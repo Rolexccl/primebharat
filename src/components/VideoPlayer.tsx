@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, Download, Play, Pause, RotateCcw, RotateCw, 
   Settings, PictureInPicture2, Lock, Unlock, AlertCircle,
-  RefreshCcw
+  RefreshCcw, ScreenShare, Maximize, Minimize
 } from 'lucide-react';
 import { Movie } from '../types';
 
@@ -34,6 +34,61 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isLandscape, setIsLandscape] = useState(false);
+
+  const toggleFullscreen = () => {
+    if (isLocked) return;
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+    resetControlsTimeout();
+  };
+
+  const toggleOrientation = async () => {
+    if (isLocked) return;
+    
+    try {
+      if (!document.fullscreenElement) {
+        await containerRef.current?.requestFullscreen();
+      }
+      
+      const orientation = (window.screen as any).orientation;
+      if (orientation?.lock) {
+        if (!isLandscape) {
+          await orientation.lock('landscape');
+          setIsLandscape(true);
+        } else {
+          await orientation.lock('portrait');
+          setIsLandscape(false);
+        }
+      } else {
+        // Fallback: Just toggle a state that we could use for CSS rotation if needed
+        setIsLandscape(!isLandscape);
+      }
+    } catch (err) {
+      console.error("Orientation lock failed:", err);
+      // Fallback for browsers that don't support locking or if it fails
+      setIsLandscape(!isLandscape);
+    }
+    resetControlsTimeout();
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        setIsLandscape(false);
+        const orientation = (window.screen as any).orientation;
+        if (orientation?.unlock) {
+          orientation.unlock();
+        }
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -275,6 +330,11 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
                 </div>
                 <div className="flex items-center gap-2">
                   {!isLocked && (
+                    <button onClick={toggleOrientation} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white" title="Rotate">
+                      <ScreenShare size={24} className={isLandscape ? 'rotate-90' : ''} />
+                    </button>
+                  )}
+                  {!isLocked && (
                     <button onClick={handleDownload} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white" title="Download">
                       <Download size={24} />
                     </button>
@@ -343,6 +403,13 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
                       className="px-4 py-1 bg-white/10 hover:bg-white/20 rounded text-white text-sm font-black uppercase tracking-widest transition-colors"
                     >
                       {isFitCover ? 'Fit' : 'Fill'}
+                    </button>
+                    <button 
+                      onClick={toggleFullscreen}
+                      className="p-2 hover:bg-white/10 rounded-full transition-colors text-white"
+                      title="Fullscreen"
+                    >
+                      {document.fullscreenElement ? <Minimize size={20} /> : <Maximize size={20} />}
                     </button>
                   </div>
                 </div>
