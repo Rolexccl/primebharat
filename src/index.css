@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "plyr/dist/plyr.css";
+
+@theme {
+  --animate-marquee: marquee 10s linear infinite;
+  
+  @keyframes marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+:root {
+  --plyr-color-main: #e50914;
+}
