@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play } from 'lucide-react';
+import { Play, Download } from 'lucide-react';
 import { Movie } from '../types';
 
 interface QualitySelectorProps {
@@ -19,6 +19,18 @@ export default function QualitySelector({ movie, onClose, onSelect }: QualitySel
         { label: '700 MB', url: movie.videoUrl },
         { label: '400 MB', url: movie.videoUrl }
       ];
+
+  const handleDownload = (url: string, label: string) => {
+    const finalUrl = url.startsWith('http') ? url : `https://${url}`;
+    const a = document.createElement('a');
+    a.href = finalUrl;
+    const extension = finalUrl.split('.').pop()?.split(/[?#]/)[0] || 'mp4';
+    a.download = `${movie.title.replace(/\s+/g, '_')}_${label}.${extension}`;
+    a.target = "_blank";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
 
   return (
     <AnimatePresence>
@@ -46,19 +58,27 @@ export default function QualitySelector({ movie, onClose, onSelect }: QualitySel
           <div className="p-6 pt-2 space-y-4">
             <div className="space-y-2">
               {qualities.map((q) => (
-                <button
-                  key={q.label}
-                  onClick={() => onSelect(movie, q.url)}
-                  className="w-full flex items-center gap-6 bg-[#2a2a2a] hover:bg-[#333] transition-all p-5 rounded-2xl group"
-                >
-                  <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center">
-                    <Play className="fill-white text-white ml-1" size={20} />
-                  </div>
-                  <div className="text-left">
-                    <span className="block text-lg font-black text-white uppercase italic tracking-tight">{q.label}</span>
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">High Quality Stream</span>
-                  </div>
-                </button>
+                <div key={q.label} className="flex gap-2">
+                  <button
+                    onClick={() => onSelect(movie, q.url)}
+                    className="flex-1 flex items-center gap-4 bg-[#2a2a2a] hover:bg-[#333] transition-all p-4 rounded-2xl group"
+                  >
+                    <div className="w-10 h-10 bg-red-600/20 rounded-full flex items-center justify-center group-hover:bg-red-600 transition-colors">
+                      <Play className="fill-white text-white ml-1" size={18} />
+                    </div>
+                    <div className="text-left">
+                      <span className="block text-base font-black text-white uppercase italic tracking-tight">{q.label}</span>
+                      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">Stream Now</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleDownload(q.url, q.label)}
+                    className="p-4 bg-[#2a2a2a] hover:bg-white/10 rounded-2xl transition-all text-white flex items-center justify-center border border-white/5"
+                    title="Download"
+                  >
+                    <Download size={20} />
+                  </button>
+                </div>
               ))}
             </div>
             <button onClick={onClose} className="w-full bg-white/5 hover:bg-white/10 text-white font-black py-4 rounded-2xl transition-all text-sm uppercase tracking-widest border border-white/10">Close</button>

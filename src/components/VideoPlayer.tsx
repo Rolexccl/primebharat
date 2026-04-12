@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, Download, Play, Pause, RotateCcw, RotateCw, 
   Settings, PictureInPicture2, Lock, Unlock, AlertCircle,
-  RefreshCcw, ScreenShare, Maximize, Minimize
+  RefreshCcw, ScreenShare, Maximize, Minimize, Volume2, VolumeX, Volume1
 } from 'lucide-react';
 import { Movie } from '../types';
 
@@ -32,6 +32,10 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
   const [error, setError] = useState<string | null>(null);
   const [downloadStatus, setDownloadStatus] = useState<string>('READY');
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [showSettings, setShowSettings] = useState(false);
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isLandscape, setIsLandscape] = useState(false);
@@ -89,6 +93,24 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  useEffect(() => {
+    if (isPlaying && !isLandscape) {
+      const autoRotate = async () => {
+        try {
+          const orientation = (window.screen as any).orientation;
+          if (orientation?.lock && !document.fullscreenElement) {
+            await containerRef.current?.requestFullscreen();
+            await orientation.lock('landscape');
+            setIsLandscape(true);
+          }
+        } catch (e) {
+          console.log("Auto-rotate failed:", e);
+        }
+      };
+      autoRotate();
+    }
+  }, [isPlaying]);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -171,6 +193,38 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
     resetControlsTimeout();
   };
 
+  const toggleMute = () => {
+    if (isLocked || !playerRef.current) return;
+    const newMuted = !isMuted;
+    playerRef.current.muted = newMuted;
+    setIsMuted(newMuted);
+    resetControlsTimeout();
+  };
+
+  const handleSpeedChange = (speed: number) => {
+    if (playerRef.current) {
+      playerRef.current.speed = speed;
+      setPlaybackSpeed(speed);
+    }
+    setShowSettings(false);
+    resetControlsTimeout();
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isLocked || !playerRef.current) return;
+    const newVolume = parseFloat(e.target.value);
+    playerRef.current.volume = newVolume;
+    setVolume(newVolume);
+    if (newVolume > 0 && isMuted) {
+      playerRef.current.muted = false;
+      setIsMuted(false);
+    } else if (newVolume === 0 && !isMuted) {
+      playerRef.current.muted = true;
+      setIsMuted(true);
+    }
+    resetControlsTimeout();
+  };
+
   const formatTime = (time: number) => {
     const h = Math.floor(time / 3600);
     const m = Math.floor((time % 3600) / 60);
@@ -181,8 +235,8 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
   const resetControlsTimeout = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    if (!isLocked && isPlaying) {
-      controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
+    if (!isLocked) {
+      controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 2000);
     }
   };
 
@@ -195,7 +249,13 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
     setDownloadStatus("REQUESTING FILE...");
     
     try {
-      const response = await fetch(videoUrl);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for initial request
+      
+      const response = await fetch(videoUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) throw new Error(`Server responded with ${response.status}`);
       if (!response.body) throw new Error('No body');
       
       const reader = response.body.getReader();
@@ -231,9 +291,12 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
       setTimeout(() => setDownloadStatus('READY'), 3000);
       setDownloadProgress(0);
     } catch(e) { 
-      setDownloadStatus("DOWNLOAD ERROR (CORS)");
+      setDownloadStatus("OPENING DIRECT LINK...");
       console.error(e);
+      // Fallback: Open in new tab if blob download fails
+      window.open(videoUrl, '_blank');
       setTimeout(() => setDownloadStatus('READY'), 3000);
+      setDownloadProgress(0);
     }
   };
 
@@ -244,7 +307,7 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       onMouseMove={handleMouseMove}
-      className="fixed inset-0 z-[500] bg-black flex flex-col items-center justify-center overflow-hidden select-none"
+      className={`fixed inset-0 z-[500] bg-black flex flex-col items-center justify-center overflow-hidden select-none ${!showControls && !isLocked ? 'cursor-none' : 'cursor-default'}`}
     >
       {/* Video Element */}
       <div className="relative w-full h-full flex items-center justify-center">
@@ -372,45 +435,102 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
                     </button>
                   </div>
 
-                  <button className="p-3 hover:bg-white/10 rounded-full transition-colors text-white hidden md:block">
+                  <button 
+                    onClick={() => setShowSettings(!showSettings)}
+                    className={`p-3 hover:bg-white/10 rounded-full transition-colors text-white hidden md:block ${showSettings ? 'bg-white/10' : ''}`}
+                  >
                     <Settings size={32} />
                   </button>
                 </div>
               )}
 
+              {/* Settings Menu */}
+              <AnimatePresence>
+                {showSettings && !isLocked && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                    className="absolute bottom-24 right-6 bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-4 w-48 z-50 shadow-2xl"
+                  >
+                    <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3 ml-1">Playback Speed</div>
+                    <div className="space-y-1">
+                      {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                        <button
+                          key={speed}
+                          onClick={() => handleSpeedChange(speed)}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-sm font-bold transition-colors flex items-center justify-between ${playbackSpeed === speed ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-white/5 hover:text-white'}`}
+                        >
+                          <span>{speed === 1 ? 'Normal' : `${speed}x`}</span>
+                          {playbackSpeed === speed && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {/* Bottom Bar */}
               {!isLocked && (
-                <div className="space-y-4">
+                <div className="space-y-4 w-full px-2">
                   <div className="flex items-center gap-4">
-                    <span className="text-white font-mono text-sm min-w-[50px]">{formatTime(currentTime)}</span>
-                    <div className="relative flex-1 h-6 flex items-center group">
+                    <span className="text-white font-mono text-sm min-w-[60px] text-center bg-black/40 px-2 py-1 rounded backdrop-blur-sm">
+                      {formatTime(currentTime)}
+                    </span>
+                    <div className="relative flex-1 h-8 flex items-center group">
                       <input 
                         type="range"
                         min="0"
                         max={duration || 0}
                         value={currentTime}
                         onChange={handleSeek}
-                        className="absolute w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-red-600 outline-none"
+                        className="absolute w-full h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer accent-red-600 outline-none z-10"
                       />
                       <div 
-                        className="h-1 bg-red-600 rounded-full pointer-events-none"
+                        className="h-1.5 bg-red-600 rounded-full pointer-events-none absolute left-0 top-1/2 -translate-y-1/2"
                         style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
                       />
                     </div>
-                    <span className="text-white font-mono text-sm min-w-[50px]">{formatTime(duration)}</span>
-                    <button 
-                      onClick={() => setIsFitCover(!isFitCover)}
-                      className="px-4 py-1 bg-white/10 hover:bg-white/20 rounded text-white text-sm font-black uppercase tracking-widest transition-colors"
-                    >
-                      {isFitCover ? 'Fit' : 'Fill'}
-                    </button>
-                    <button 
-                      onClick={toggleFullscreen}
-                      className="p-2 hover:bg-white/10 rounded-full transition-colors text-white"
-                      title="Fullscreen"
-                    >
-                      {document.fullscreenElement ? <Minimize size={20} /> : <Maximize size={20} />}
-                    </button>
+                    <span className="text-white font-mono text-sm min-w-[60px] text-center bg-black/40 px-2 py-1 rounded backdrop-blur-sm">
+                      {formatTime(duration)}
+                    </span>
+
+                    {/* Volume Control */}
+                    <div className="flex items-center gap-2 group/volume ml-2">
+                      <button 
+                        onClick={toggleMute}
+                        className="p-2 hover:bg-white/10 rounded-full transition-colors text-white"
+                      >
+                        {isMuted || volume === 0 ? <VolumeX size={20} /> : volume < 0.5 ? <Volume1 size={20} /> : <Volume2 size={20} />}
+                      </button>
+                      <div className="w-0 group-hover/volume:w-24 transition-all duration-300 overflow-hidden flex items-center">
+                        <input 
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={isMuted ? 0 : volume}
+                          onChange={handleVolumeChange}
+                          className="w-20 h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-white outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 ml-auto">
+                      <button 
+                        onClick={() => setIsFitCover(!isFitCover)}
+                        className="px-4 py-1.5 bg-white/10 hover:bg-white/20 rounded text-white text-[10px] font-black uppercase tracking-widest transition-colors border border-white/10"
+                      >
+                        {isFitCover ? 'Fit' : 'Fill'}
+                      </button>
+                      <button 
+                        onClick={toggleFullscreen}
+                        className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors text-white border border-white/10"
+                        title="Fullscreen"
+                      >
+                        {document.fullscreenElement ? <Minimize size={18} /> : <Maximize size={18} />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

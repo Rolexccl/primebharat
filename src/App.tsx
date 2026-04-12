@@ -680,11 +680,20 @@ export default function App() {
         // Get user identifier (IP with fallback to LocalStorage ID)
         let identifier = '';
         try {
-          const res = await fetch('https://api.ipify.org?format=json');
-          const { ip } = await res.json();
-          identifier = ip.replace(/\./g, '_');
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout
+          
+          const res = await fetch('https://api.ipify.org?format=json', { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (res.ok) {
+            const { ip } = await res.json();
+            identifier = ip.replace(/\./g, '_');
+          } else {
+            throw new Error('IP service error');
+          }
         } catch (e) {
-          console.warn('IP fetch failed, using fallback ID:', e);
+          console.warn('IP fetch skipped/failed, using fallback ID');
           // Fallback to a persistent random ID if IP fetch fails (e.g. due to CORS or adblockers)
           let fallbackId = localStorage.getItem('bharat_prime_user_id');
           if (!fallbackId) {
