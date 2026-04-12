@@ -10,6 +10,27 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Verify URL availability
+  app.get("/api/verify-url", async (req, res) => {
+    const videoUrl = req.query.url as string;
+    if (!videoUrl) return res.status(400).json({ ok: false, error: "URL required" });
+
+    try {
+      // Try HEAD request first as it's faster
+      const response = await fetch(videoUrl, { method: "HEAD" });
+      
+      if (response.ok) {
+        return res.json({ ok: true });
+      }
+
+      // Fallback to GET if HEAD is not allowed (some servers block HEAD)
+      const getResponse = await fetch(videoUrl, { method: "GET" });
+      return res.json({ ok: getResponse.ok });
+    } catch (error) {
+      return res.json({ ok: false, error: "Network error" });
+    }
+  });
+
   // Download Proxy to bypass CORS
   app.get("/api/proxy-download", async (req, res) => {
     const videoUrl = req.query.url as string;

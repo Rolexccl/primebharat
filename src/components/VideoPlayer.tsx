@@ -30,6 +30,7 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
   const [isFitCover, setIsFitCover] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [isPip, setIsPip] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloadStatus, setDownloadStatus] = useState<string>('READY');
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
@@ -129,10 +130,14 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
       const onLoadedMetadata = () => setDuration(video.duration);
       const onDurationChange = () => setDuration(video.duration);
       const onTimeUpdate = () => setCurrentTime(video.currentTime);
+      const onEnterPip = () => setIsPip(true);
+      const onLeavePip = () => setIsPip(false);
 
       video.addEventListener('loadedmetadata', onLoadedMetadata);
       video.addEventListener('durationchange', onDurationChange);
       video.addEventListener('timeupdate', onTimeUpdate);
+      video.addEventListener('enterpictureinpicture', onEnterPip);
+      video.addEventListener('leavepictureinpicture', onLeavePip);
 
       player.on('waiting', () => setIsBuffering(true));
       player.on('playing', () => setIsBuffering(false));
@@ -149,6 +154,8 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
         video.removeEventListener('loadedmetadata', onLoadedMetadata);
         video.removeEventListener('durationchange', onDurationChange);
         video.removeEventListener('timeupdate', onTimeUpdate);
+        video.removeEventListener('enterpictureinpicture', onEnterPip);
+        video.removeEventListener('leavepictureinpicture', onLeavePip);
         if (playerRef.current) playerRef.current.destroy();
         if (hlsRef.current) hlsRef.current.destroy();
       };
@@ -250,10 +257,20 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
     const urlPath = new URL(videoUrl).pathname;
     const fileName = urlPath.split('/').pop() || `${movie.title.replace(/\s+/g, '_')}.mp4`;
     
-    setDownloadStatus("STARTING...");
+    setDownloadStatus("VERIFYING...");
     
     try {
-      // Use our backend proxy to bypass CORS and force download
+      // 1. Check if the file is actually available on the source server
+      const verifyResponse = await fetch(`/api/verify-url?url=${encodeURIComponent(videoUrl)}`);
+      const verifyResult = await verifyResponse.json();
+      
+      if (!verifyResult.ok) {
+        throw new Error("File not available on source server");
+      }
+
+      setDownloadStatus("STARTING...");
+      
+      // 2. Use our backend proxy to bypass CORS and force download
       const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(videoUrl)}&filename=${encodeURIComponent(fileName)}`;
       
       const link = document.createElement('a');
@@ -269,12 +286,18 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
         setDownloadProgress(0);
       }, 3000);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Download failed:', error);
-      setDownloadStatus("DOWNLOAD FAILED");
+      const errorMessage = error.message === "File not available on source server" 
+        ? "FILE NOT FOUND" 
+        : "DOWNLOAD FAILED";
+        
+      setDownloadStatus(errorMessage);
       
-      // Fallback: Direct link
-      window.open(videoUrl, '_blank');
+      // Fallback: Direct link (only if it wasn't a 404)
+      if (error.message !== "File not available on source server") {
+        window.open(videoUrl, '_blank');
+      }
 
       setTimeout(() => {
         setDownloadStatus('READY');
@@ -316,7 +339,7 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
 
         {/* Buffering Indicator */}
         <AnimatePresence>
-          {isBuffering && !error && (
+          {isBuffering && !error && !isPip && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -324,6 +347,42 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
               className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none z-10"
             >
               <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Picture in Picture Overlay */}
+        <AnimatePresence>
+          {isPip && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/80 backdrop-blur-md z-40"
+            >
+              <div className="relative">
+                <div className="w-24 h-24 bg-red-600/10 rounded-full flex items-center justify-center border border-red-600/20 animate-pulse">
+                  <PictureInPicture2 className="text-red-600" size={40} />
+                </div>
+                <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 rounded-full border-2 border-zinc-950" />
+              </div>
+              <h3 className="text-xl font-black text-white mt-6 uppercase italic tracking-tighter">Playing in Picture-in-Picture</h3>
+              <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] mt-2">Video is active in a floating window</p>
+              
+              <div className="flex gap-3 mt-8">
+                <button
+                  onClick={togglePip}
+                  className="px-6 py-3 bg-white text-black font-black rounded-xl text-[10px] uppercase tracking-widest hover:bg-zinc-200 transition-all shadow-xl"
+                >
+                  Back to Player
+                </button>
+                <button
+                  onClick={onClose}
+                  className="px-6 py-3 bg-white/5 text-white font-black rounded-xl text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all border border-white/10"
+                >
+                  Close Player
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -367,7 +426,7 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
 
         {/* Custom Controls Overlay */}
         <AnimatePresence>
-          {showControls && !error && (
+          {showControls && !error && !isPip && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
