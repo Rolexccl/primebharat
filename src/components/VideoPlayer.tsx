@@ -53,12 +53,21 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = async () => {
     if (isLocked) return;
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen();
-    } else {
-      document.exitFullscreen();
+    try {
+      if (!document.fullscreenElement) {
+        await containerRef.current?.requestFullscreen();
+        // Attempt orientation lock after entering fullscreen
+        const orientation = (window.screen as any).orientation;
+        if (orientation?.lock) {
+          await orientation.lock('landscape').catch((err: any) => console.log('Orientation lock failed:', err));
+        }
+      } else {
+        document.exitFullscreen();
+      }
+    } catch (err) {
+      console.error("Fullscreen/Orientation error:", err);
     }
     resetControlsTimeout();
   };
@@ -66,9 +75,24 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
   const toggleOrientation = async () => {
     if (isLocked) return;
     
-    // Toggle landscape state to trigger CSS rotation fallback
-    // since ScreenOrientation.lock is often blocked in sandboxed iframes
-    setIsLandscape(!isLandscape);
+    try {
+      const orientation = (window.screen as any).orientation;
+      if (orientation?.lock) {
+        if (!isLandscape) {
+          await orientation.lock('landscape').catch((err: any) => console.log('Orientation lock failed:', err));
+          setIsLandscape(true);
+        } else {
+          await orientation.lock('portrait').catch((err: any) => console.log('Orientation lock failed:', err));
+          setIsLandscape(false);
+        }
+      } else {
+        // Fallback: Just toggle state for CSS rotation
+        setIsLandscape(!isLandscape);
+      }
+    } catch (err) {
+      console.log("Orientation API not supported or blocked:", err);
+      setIsLandscape(!isLandscape);
+    }
     resetControlsTimeout();
   };
 
@@ -470,8 +494,8 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
                       <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black mt-1">10</span>
                     </button>
 
-                    <button onClick={togglePlay} className="p-6 bg-white/10 hover:bg-white/20 rounded-full transition-all text-white scale-125 hover:scale-150">
-                      {isPlaying ? <Pause size={48} fill="currentColor" /> : <Play size={48} fill="currentColor" className="ml-1" />}
+                    <button onClick={togglePlay} className="p-4 bg-white/10 hover:bg-white/20 rounded-full transition-all text-white hover:scale-110">
+                      {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" className="ml-1" />}
                     </button>
 
                     <button onClick={() => skip(10)} className="relative p-2 hover:bg-white/10 rounded-full transition-colors text-white group">
@@ -500,6 +524,21 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
                           >
                             <Download size={18} />
                             <span>Download</span>
+                          </button>
+
+                          <div className="h-px bg-white/5 mx-2" />
+
+                          <button
+                            onClick={() => { setIsFitCover(!isFitCover); setShowSettings(false); }}
+                            className="w-full text-left px-4 py-3 rounded-xl text-sm font-bold text-zinc-300 hover:bg-white/5 hover:text-white transition-colors flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Maximize size={18} />
+                              <span>Fill Screen</span>
+                            </div>
+                            <div className={`w-8 h-4 rounded-full relative transition-colors ${isFitCover ? 'bg-red-600' : 'bg-white/10'}`}>
+                              <div className={`absolute top-1 w-2 h-2 bg-white rounded-full transition-all ${isFitCover ? 'left-5' : 'left-1'}`} />
+                            </div>
                           </button>
 
                           <div className="h-px bg-white/5 mx-2" />
