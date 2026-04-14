@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "movieRequest": {
+      "title": "Movie Request",
+      "description": "A request for a movie or series from a user",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The name of the movie or series"
+        },
+        "year": {
+          "type": "string",
+          "description": "The release year"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Movie", "Web Series"],
+          "description": "The type of content"
+        },
+        "language": {
+          "type": "string",
+          "description": "Preferred language"
+        },
+        "note": {
+          "type": "string",
+          "description": "Additional user notes"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "solved"],
+          "description": "Current status of the request"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the request was made"
+        },
+        "userName": {
+          "type": "string",
+          "description": "IP or identifier of the user"
+        }
+      },
+      "required": ["title", "category", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/movieRequests/{requestId}": {
+      "schema": "movieRequest",
+      "description": "Collection of movie requests"
+    }
+  }
+}

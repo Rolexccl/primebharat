@@ -14,7 +14,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-type ViewType = 'dashboard' | 'upload' | 'security';
+type ViewType = 'dashboard' | 'upload' | 'security' | 'requests';
 
 export default function AdminPanel({ 
   onClose, 
@@ -31,12 +31,14 @@ export default function AdminPanel({
   const [activeFilter, setActiveFilter] = useState<'All' | 'Movie' | 'Series' | 'Banner'>('All');
   const [formData, setFormData] = useState({
     title: '',
+    year: '',
     image: '',
     category: 'Movie',
     language: 'Kannada',
     links: [{ label: '720p', url: '' }]
   });
   const [movies, setMovies] = useState<Movie[]>([]);
+  const [movieRequests, setMovieRequests] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -51,6 +53,15 @@ export default function AdminPanel({
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       setMovies(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "movieRequests"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMovieRequests(list);
     });
     return () => unsubscribe();
   }, []);
@@ -181,6 +192,7 @@ export default function AdminPanel({
     try {
       const dataToSave = {
         title: formData.title.trim(),
+        year: formData.year.trim(),
         image: formData.image.trim(),
         category: formData.category,
         language: formData.category === 'Banner' ? '' : formData.language,
@@ -211,6 +223,7 @@ export default function AdminPanel({
     setEditId(movie.id);
     setFormData({
       title: movie.title || '',
+      year: movie.year || '',
       image: movie.image || '',
       category: movie.category || 'Movie',
       language: movie.language || 'Kannada',
@@ -230,10 +243,44 @@ export default function AdminPanel({
     }
   };
 
+  const handleSolveRequest = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "movieRequests", id), { status: 'solved' });
+      toast.success("Marked as Solved");
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
+  const handleDeleteRequest = async (id: string) => {
+    if (window.confirm("Reject and delete this request?")) {
+      try {
+        await deleteDoc(doc(db, "movieRequests", id));
+        toast.info("Request Removed");
+      } catch (error: any) {
+        toast.error(error.message);
+      }
+    }
+  };
+
+  const handleClearSolvedRequests = async () => {
+    if (!window.confirm("Clear all solved requests?")) return;
+    try {
+      const solved = movieRequests.filter(r => r.status === 'solved');
+      const batch = writeBatch(db);
+      solved.forEach(r => batch.delete(doc(db, "movieRequests", r.id)));
+      await batch.commit();
+      toast.info("Solved Requests Cleared");
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
   const resetForm = () => {
     setEditId(null);
     setFormData({
       title: '',
+      year: '',
       image: '',
       category: 'Movie',
       language: 'Kannada',
@@ -251,7 +298,8 @@ export default function AdminPanel({
     total: movies.length,
     movies: movies.filter(m => m.category === 'Movie').length,
     series: movies.filter(m => m.category === 'Series').length,
-    banners: movies.filter(m => m.category === 'Banner').length
+    banners: movies.filter(m => m.category === 'Banner').length,
+    pendingRequests: movieRequests.filter(r => r.status === 'pending').length
   };
 
   return (
@@ -281,6 +329,20 @@ export default function AdminPanel({
           >
             <PlusCircle size={20} />
             {!isSidebarCollapsed && <span>Add Content</span>}
+          </button>
+          <button 
+            onClick={() => { setActiveView('requests'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
+            className={`w-full flex items-center justify-between p-4 rounded-xl transition-all font-medium text-sm ${activeView === 'requests' ? 'bg-[#1f1f1f] text-white border-l-4 border-[#e50914]' : 'text-[#aaa] hover:bg-[#1f1f1f] hover:text-white'}`}
+          >
+            <div className="flex items-center gap-3">
+              <ListVideo size={20} />
+              {!isSidebarCollapsed && <span>User Requests</span>}
+            </div>
+            {!isSidebarCollapsed && stats.pendingRequests > 0 && (
+              <span className="bg-[#e50914] text-white text-[10px] px-2 py-0.5 rounded-full font-black">
+                {stats.pendingRequests}
+              </span>
+            )}
           </button>
           <button 
             onClick={() => { setActiveView('security'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
@@ -373,19 +435,19 @@ export default function AdminPanel({
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-10">
                       <div className="bg-[#111] border border-[#222] p-6 rounded-2xl hover:border-[#e50914]/30 transition-colors group">
                         <h3 className="text-3xl font-black mb-1 group-hover:text-[#e50914] transition-colors">{stats.total}</h3>
-                        <span className="text-[10px] font-black text-[#555] uppercase tracking-widest">Total Content</span>
+                        <span className="text-[10px] font-black text-[#555] uppercase tracking-widest">TOTAL ASSETS</span>
+                      </div>
+                      <div className="bg-[#111] border border-[#222] p-6 rounded-2xl hover:border-yellow-500/30 transition-colors group">
+                        <h3 className="text-3xl font-black mb-1 text-yellow-500">{stats.pendingRequests}</h3>
+                        <span className="text-[10px] font-black text-[#555] uppercase tracking-widest">PENDING REQS</span>
                       </div>
                       <div className="bg-[#111] border border-[#222] p-6 rounded-2xl hover:border-red-500/30 transition-colors group">
                         <h3 className="text-3xl font-black mb-1 text-red-600">{stats.movies}</h3>
-                        <span className="text-[10px] font-black text-[#555] uppercase tracking-widest">Movies</span>
+                        <span className="text-[10px] font-black text-[#555] uppercase tracking-widest">MOVIES</span>
                       </div>
                       <div className="bg-[#111] border border-[#222] p-6 rounded-2xl hover:border-blue-500/30 transition-colors group">
                         <h3 className="text-3xl font-black mb-1 text-blue-500">{stats.series}</h3>
-                        <span className="text-[10px] font-black text-[#555] uppercase tracking-widest">Series</span>
-                      </div>
-                      <div className="bg-[#111] border border-[#222] p-6 rounded-2xl hover:border-yellow-500/30 transition-colors group">
-                        <h3 className="text-3xl font-black mb-1 text-yellow-500">{stats.banners}</h3>
-                        <span className="text-[10px] font-black text-[#555] uppercase tracking-widest">Banners</span>
+                        <span className="text-[10px] font-black text-[#555] uppercase tracking-widest">SERIES</span>
                       </div>
                     </div>
                   </div>
@@ -408,7 +470,7 @@ export default function AdminPanel({
                 
                 <form onSubmit={handleSubmit} className="space-y-8">
                   <div className="grid md:grid-cols-2 gap-8">
-                    <div className="space-y-2 md:col-span-2">
+                    <div className="space-y-2">
                       <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Title</label>
                       <input 
                         type="text" 
@@ -416,6 +478,17 @@ export default function AdminPanel({
                         onChange={e => setFormData({...formData, title: e.target.value})}
                         className="w-full bg-[#1f1f1f] border border-[#333] rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-sm font-medium"
                         placeholder="Movie Name"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Release Year</label>
+                      <input 
+                        type="text" 
+                        value={formData.year}
+                        onChange={e => setFormData({...formData, year: e.target.value})}
+                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-sm font-medium"
+                        placeholder="Ex: 2025"
                       />
                     </div>
                     
@@ -518,6 +591,85 @@ export default function AdminPanel({
                     )}
                   </div>
                 </form>
+              </motion.div>
+            )}
+
+            {activeView === 'requests' && (
+              <motion.div 
+                key="requests"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-6"
+              >
+                <div className="flex justify-between items-center mb-6">
+                  <h4 className="text-xl font-black italic flex items-center gap-3">
+                    <ListVideo className="text-[#e50914]" /> MOVIE REQUESTS
+                  </h4>
+                  <button 
+                    onClick={handleClearSolvedRequests}
+                    className="text-[10px] font-black text-red-500 hover:text-red-400 uppercase tracking-widest border border-red-500/20 px-4 py-2 rounded-lg hover:bg-red-500/5 transition-all"
+                  >
+                    Clear Solved
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {movieRequests.length === 0 ? (
+                    <div className="bg-[#111] border border-[#222] p-20 rounded-[2rem] text-center text-[#444] font-black uppercase tracking-[0.3em]">
+                      No active requests
+                    </div>
+                  ) : (
+                    movieRequests.map((req) => (
+                      <div 
+                        key={req.id} 
+                        className={`bg-[#1a1a1a] border border-[#222] p-6 rounded-2xl transition-all hover:border-white/10 ${req.status === 'solved' ? 'border-l-4 border-l-green-500 opacity-80' : ''}`}
+                      >
+                        <div className="flex flex-col md:flex-row justify-between gap-6">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h5 className="text-lg font-black text-white uppercase italic tracking-tighter">{req.title}</h5>
+                              <span className="text-zinc-500 text-xs font-bold">({req.year || 'N/A'})</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              <span className="text-[9px] font-black bg-zinc-800 text-zinc-400 px-2 py-1 rounded uppercase tracking-widest">{req.category}</span>
+                              <span className="text-[9px] font-black bg-zinc-800 text-zinc-400 px-2 py-1 rounded uppercase tracking-widest">{req.language || 'Any'}</span>
+                            </div>
+                            {req.note && (
+                              <p className="text-cyan-500 text-xs font-medium mb-3 bg-cyan-500/5 p-3 rounded-xl border border-cyan-500/10">
+                                <span className="text-[10px] font-black uppercase tracking-widest block mb-1 opacity-50">Note:</span>
+                                {req.note}
+                              </p>
+                            )}
+                            <div className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">
+                              Requested by: {req.userName || 'User'} • {req.timestamp?.toDate().toLocaleString() || '...'}
+                            </div>
+                          </div>
+                          <div className="flex flex-row md:flex-col gap-2 justify-end">
+                            {req.status !== 'solved' ? (
+                              <button 
+                                onClick={() => handleSolveRequest(req.id)}
+                                className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                              >
+                                <Check size={14} /> Solve
+                              </button>
+                            ) : (
+                              <span className="flex-1 md:flex-none bg-green-500/10 text-green-500 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-center border border-green-500/20">
+                                SOLVED
+                              </span>
+                            )}
+                            <button 
+                              onClick={() => handleDeleteRequest(req.id)}
+                              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-red-600/20 hover:text-red-500 text-zinc-400 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border border-transparent hover:border-red-600/20"
+                            >
+                              <Trash size={14} /> Reject
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </motion.div>
             )}
 
@@ -640,7 +792,10 @@ export default function AdminPanel({
                             />
                           </td>
                           <td className="p-6">
-                            <div className="font-black text-lg tracking-tight mb-2 group-hover:text-[#e50914] transition-colors">{movie.title}</div>
+                            <div className="flex items-center gap-3 mb-2">
+                              <div className="font-black text-lg tracking-tight group-hover:text-[#e50914] transition-colors">{movie.title}</div>
+                              {movie.year && <span className="text-[#555] text-xs font-bold">({movie.year})</span>}
+                            </div>
                             <div className="flex flex-wrap gap-2">
                               <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${movie.category === 'Banner' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : movie.category === 'Series' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-red-600/10 text-red-600 border border-red-600/20'}`}>
                                 {movie.category}

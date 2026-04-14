@@ -27,7 +27,7 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
-  const [isFitCover, setIsFitCover] = useState(false);
+  const [isFitCover, setIsFitCover] = useState(true);
   const [showControls, setShowControls] = useState(true);
   const [isBuffering, setIsBuffering] = useState(false);
   const [isPip, setIsPip] = useState(false);
@@ -185,6 +185,23 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
       };
     }
   }, [selectedUrl]);
+
+  const lastClickTimeRef = useRef<number>(0);
+
+  const handleVideoClick = (e: React.MouseEvent) => {
+    const now = Date.now();
+    const DOUBLE_CLICK_DELAY = 300;
+    
+    if (now - lastClickTimeRef.current < DOUBLE_CLICK_DELAY) {
+      // Double tap detected
+      setIsFitCover(!isFitCover);
+      resetControlsTimeout();
+    } else {
+      // Single tap
+      togglePlay();
+    }
+    lastClickTimeRef.current = now;
+  };
 
   const togglePlay = () => {
     if (isLocked || error) return;
@@ -358,7 +375,7 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
           playsInline 
           preload="auto"
           className={`w-full h-full transition-all duration-300 ${isFitCover ? 'object-cover' : 'object-contain'} ${error ? 'opacity-20' : 'opacity-100'}`}
-          onClick={togglePlay}
+          onClick={handleVideoClick}
         />
 
         {/* Buffering Indicator */}
@@ -674,6 +691,14 @@ export default function VideoPlayer({ movie, selectedUrl, onClose }: VideoPlayer
                           />
                         </div>
                       </div>
+
+                      <button 
+                        onClick={() => setIsFitCover(!isFitCover)}
+                        className={`p-2 hover:bg-white/10 rounded-full transition-colors ${isFitCover ? 'text-red-600 bg-white/5' : 'text-white'}`}
+                        title={isFitCover ? 'Original Size' : 'Fill Screen'}
+                      >
+                        <Maximize size={20} />
+                      </button>
 
                       <button 
                         onClick={toggleFullscreen}

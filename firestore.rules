@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return true; // App uses IP-based/PIN-based auth instead of Firebase Auth
+    }
+
+    // Movies collection
+    match /movies/{movieId} {
+      allow read: if true;
+      allow write: if true; // Admin panel handles this, but for simplicity in this applet
+    }
+
+    // User lists (My List)
+    match /user_lists/{userId} {
+      allow read, write: if true;
+    }
+
+    // Authorized IPs
+    match /authorized_ips/{ip} {
+      allow read, write: if true;
+    }
+
+    // Config (Admin PIN)
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Movie Requests
+    match /movieRequests/{requestId} {
+      allow create: if true;
+      allow read: if true; // Allow admin to read (and users if needed)
+      allow update, delete: if true; // Allow admin to manage
+    }
+  }
+}

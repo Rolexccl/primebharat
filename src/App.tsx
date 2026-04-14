@@ -13,6 +13,7 @@ import { MOVIES } from './constants';
 import AdminPanel from './components/AdminPanel';
 import QualitySelector from './components/QualitySelector';
 import VideoPlayer from './components/VideoPlayer';
+import MovieRequest from './components/MovieRequest';
 
 // --- Helpers ---
 
@@ -217,6 +218,7 @@ const Navbar = ({
   onHomeClick,
   onMoviesClick,
   onAdminClick,
+  onRequestClick,
   searchQuery,
   setSearchQuery,
   hideMain,
@@ -262,13 +264,14 @@ const Navbar = ({
             </button>
           </div>
           <div className={`hidden md:flex items-center gap-6 font-semibold text-gray-400 text-sm uppercase tracking-widest`}>
-            {['Home', 'Movies', 'Web Series', 'My List'].map((item) => (
+            {['Home', 'Movies', 'Web Series', 'My List', 'Request'].map((item) => (
               <button 
                 key={item}
                 onClick={() => {
                   if (item === 'Home') onHomeClick();
                   else if (item === 'Movies') onMoviesClick();
                   else if (item === 'Web Series') onWebSeriesClick();
+                  else if (item === 'Request') onRequestClick();
                   else onMyListClick();
                   setSearchQuery('');
                 }} 
@@ -333,13 +336,14 @@ const Navbar = ({
               </h2>
               
               <div className="flex flex-col items-center gap-6">
-                {['Home', 'Movies', 'Web Series', 'My List'].map((item) => (
+                {['Home', 'Movies', 'Web Series', 'My List', 'Request'].map((item) => (
                   <button 
                     key={item}
                     onClick={() => {
                       if (item === 'Home') onHomeClick();
                       else if (item === 'Movies') onMoviesClick();
                       else if (item === 'Web Series') onWebSeriesClick();
+                      else if (item === 'Request') onRequestClick();
                       else onMyListClick();
                       setSearchQuery('');
                       setIsMobileMenuOpen(false);
@@ -633,7 +637,7 @@ const Footer = () => (
 export default function App() {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [myListIds, setMyListIds] = useState<string[]>([]);
-  const [currentView, setCurrentView] = useState<'home' | 'myList' | 'movies'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'myList' | 'movies' | 'request'>('home');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
@@ -796,16 +800,22 @@ export default function App() {
           onHomeClick={() => { setCurrentView('home'); setSelectedCategory(null); }}
           onMoviesClick={() => { setCurrentView('movies'); setSelectedCategory(null); }}
           onMyListClick={() => { setCurrentView('myList'); setSelectedCategory(null); }}
+          onRequestClick={() => { setCurrentView('request'); setSelectedCategory(null); }}
           onWebSeriesClick={() => setIsModalOpen(true)}
           onAdminClick={() => setIsAdminOpen(true)}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
-          hideMain={!!selectedCategory || currentView === 'myList' || currentView === 'movies'}
+          hideMain={!!selectedCategory || currentView === 'myList' || currentView === 'movies' || currentView === 'request'}
           myListCount={myListIds.length}
         />
 
         <main className="pt-0">
-        {selectedCategory ? (
+        {currentView === 'request' ? (
+          <MovieRequest 
+            onClose={() => setCurrentView('home')} 
+            userIp={userIp}
+          />
+        ) : selectedCategory ? (
           <div className="pb-20 pt-8 md:pt-12 px-4 md:px-12">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
               <div className="flex items-center gap-4">
