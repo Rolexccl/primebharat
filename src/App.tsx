@@ -46,11 +46,11 @@ const getDisplayPlanName = (user: any) => {
   const priceString = (user?.planPrice || user?.amount || '').toString().replace(/[^0-9]/g, '');
   const price = parseInt(priceString);
   
-  if (price === 149) return '90 DAYS';
-  if (price === 55) return 'MONTHLY';
-  if (price === 19) return 'WEEKLY';
+  if (price === 149) return '90 Days (149 RS)';
+  if (price === 55) return 'Monthly (55 RS)';
+  if (price === 19) return 'Weekly (19 RS)';
   
-  return 'BASIC';
+  return 'Premium Member';
 };
 
 // --- Components ---
@@ -511,8 +511,8 @@ const Navbar = ({
             )}
           </div>
 
-          <a href="https://t.me/primebharath1" target="_blank" rel="noreferrer" className="hidden lg:flex items-center gap-2 bg-[#229ED9] hover:bg-[#229ED9]/90 px-6 py-2.5 rounded-full text-[10px] font-black text-white shadow-xl transition-all hover:scale-105 active:scale-95 uppercase tracking-widest whitespace-nowrap">
-            <Send className="w-3 h-3 fill-current" /> Join Telegram
+          <a href="https://t.me/primebharath1" target="_blank" rel="noreferrer" className="hidden lg:flex items-center gap-2 bg-[#0088CC] hover:bg-[#0088CC]/90 px-6 py-2.5 rounded-full text-[10px] font-black text-white shadow-[0_5px_15px_rgba(0,136,204,0.3)] transition-all hover:scale-105 active:scale-95 uppercase tracking-widest whitespace-nowrap">
+            <Send className="w-3.5 h-3.5 fill-current" /> JOIN TELEGRAM
           </a>
 
           <button 
@@ -1042,6 +1042,8 @@ export default function App() {
       });
       setCurrentUser(userData);
       setIsAuthorized(true);
+      setCurrentView('home');
+      setSelectedCategory(null);
     } catch (err) {
       console.error('Error saving authorization:', err);
       setIsAuthorized(true);

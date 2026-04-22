@@ -9,6 +9,7 @@ export interface Movie {
   year: number;
   description: string;
   videoUrl: string;
+  quality?: string;
   isTrending?: boolean;
   trendAnalyzedAt?: any;
   links?: { label: string; url: string }[];
