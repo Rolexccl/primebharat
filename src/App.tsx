@@ -307,12 +307,14 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
           </motion.button>
         </form>
 
-        <motion.div variants={itemVariants} className="mt-3 text-center">
+        <motion.div variants={itemVariants} className="mt-5 text-center">
             <button 
               onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
-              className="text-[7.5px] font-black uppercase tracking-[0.3em] text-zinc-500 hover:text-red-500 transition-colors"
+              className="px-6 py-2 rounded-full bg-red-600/10 border border-red-600/20 text-red-500 hover:bg-red-600 hover:text-white transition-all text-[7.5px] font-black uppercase tracking-[0.3em] shadow-lg shadow-red-600/5 group"
             >
-              {isRegistering ? 'Already have account? Login' : "Don't have an account? Create One"}
+              <span className="group-hover:scale-105 inline-block transition-transform">
+                {isRegistering ? 'Already have account? Login' : "Don't have an account? Create One"}
+              </span>
             </button>
         </motion.div>
 
