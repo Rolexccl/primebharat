@@ -324,7 +324,7 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
         >
           <p className="text-zinc-700 text-[7.5px] font-black uppercase tracking-[0.4em]">Subscription Support</p>
           <a 
-            href="https://telegram.me/rajatpatidar1" 
+            href="https://telegram.me/primebharath1" 
             target="_blank" 
             rel="noreferrer"
             className="group flex items-center gap-2 bg-white/5 px-5 py-2.5 rounded-lg border border-white/5 hover:border-red-600 hover:bg-red-600/10 transition-all no-underline w-full justify-center"
