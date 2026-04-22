@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/verify-url",
+      "destination": "/api/verify-url.js"
+    },
+    {
+      "source": "/api/proxy-download",
+      "destination": "/api/proxy-download.js"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
