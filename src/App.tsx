@@ -5,8 +5,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, ChevronLeft, ChevronRight, Search, Bell, Plus, Check, X, Send, Settings, Menu, ShieldCheck, Home, Film, Tv2, Heart, MessageSquarePlus, CircleUser, Lock, User as UserIcon } from 'lucide-react';
-import { doc, setDoc, onSnapshot, collection, writeBatch, query, orderBy, serverTimestamp, getDoc } from 'firebase/firestore';
+import { Play, ChevronLeft, ChevronRight, Search, Bell, Plus, Check, X, Send, Settings, Menu, ShieldCheck, Home, Film, Tv2, Heart, MessageSquarePlus, CircleUser, Lock, User as UserIcon, ChevronDown } from 'lucide-react';
+import { doc, setDoc, onSnapshot, collection, writeBatch, query, orderBy, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
+import { toast, ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import { db } from './firebase';
 import { Movie, User } from './types';
 import { MOVIES } from './constants';
@@ -44,11 +46,11 @@ const getDisplayPlanName = (user: any) => {
   const priceString = (user?.planPrice || user?.amount || '').toString().replace(/[^0-9]/g, '');
   const price = parseInt(priceString);
   
-  if (price === 149) return '90 DAYS';
-  if (price === 55) return 'MONTHLY';
-  if (price === 19) return 'WEEKLY';
+  if (price === 149) return '90 Days (149 RS)';
+  if (price === 55) return 'Monthly (55 RS)';
+  if (price === 19) return 'Weekly (19 RS)';
   
-  return 'BASIC';
+  return 'Premium Member';
 };
 
 // --- Components ---
@@ -58,6 +60,8 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [registerData, setRegisterData] = useState({ name: '', userId: '', password: '', plan: 'Weekly (19 RS)' });
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,6 +74,17 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
     setError('');
     
     try {
+      // First check if a registration request is pending
+      const regSnap = await getDoc(doc(db, "registrationRequests", userId.trim()));
+      if (regSnap.exists()) {
+        const regData = regSnap.data();
+        if (regData.status === 'pending') {
+          setError('Your account is pending admin approval.');
+          setIsVerifying(false);
+          return;
+        }
+      }
+
       const userSnap = await getDoc(doc(db, "users", userId.trim()));
       if (userSnap.exists()) {
         const userData = { ...userSnap.data(), userId: userSnap.id } as User;
@@ -98,6 +113,47 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
     }
   };
 
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!registerData.name || !registerData.userId || !registerData.password) {
+      setError('All fields are required');
+      return;
+    }
+    
+    setIsVerifying(true);
+    setError('');
+    
+    try {
+      // Check if ID already exists in users or requests
+      const userSnap = await getDoc(doc(db, "users", registerData.userId.trim()));
+      const regSnap = await getDoc(doc(db, "registrationRequests", registerData.userId.trim()));
+      
+      if (userSnap.exists() || regSnap.exists()) {
+        setError('This User ID is already taken.');
+        setIsVerifying(false);
+        return;
+      }
+
+      await setDoc(doc(db, "registrationRequests", registerData.userId.trim()), {
+        ...registerData,
+        status: 'pending',
+        timestamp: serverTimestamp()
+      });
+      
+      setError('Request sent! Please wait for admin approval.');
+      setRegisterData({ name: '', userId: '', password: '', plan: 'Weekly (19 RS)' });
+      setTimeout(() => {
+        setIsRegistering(false);
+        setError('');
+      }, 3000);
+    } catch (err) {
+      console.error('Registration error:', err);
+      setError('Failed to send request. Try again.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
@@ -113,7 +169,7 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
       initial="hidden"
       animate="visible"
       variants={containerVariants}
-      className="fixed inset-0 z-[600] bg-black flex items-center justify-center p-4 lg:p-10 shrink-0 overflow-hidden"
+      className="fixed inset-0 z-[600] bg-[#121212] flex items-center justify-center p-4 lg:p-10 shrink-0 overflow-hidden"
     >
       {/* Cinematic Background Layer */}
       <div className="absolute inset-0 z-0">
@@ -124,54 +180,97 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
 
       <motion.div 
         variants={itemVariants}
-        className="w-full max-w-sm bg-zinc-900/40 backdrop-blur-3xl border border-white/5 p-6 sm:p-8 md:p-10 rounded-[2.5rem] shadow-[0_0_80px_rgba(0,0,0,0.8)] relative z-10 ring-1 ring-white/5"
+        className="w-full max-w-[320px] bg-zinc-950/60 backdrop-blur-3xl border border-white/5 p-4 sm:p-6 rounded-2xl shadow-[0_0_80px_rgba(0,0,0,0.8)] relative z-10 ring-1 ring-white/5 max-h-[90vh] overflow-y-auto custom-scrollbar"
       >
-        <div className="text-center mb-6 md:mb-8">
+        <div className="text-center mb-4">
           <motion.div 
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.2, type: 'spring' }}
-            className="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-red-600/5 rounded-2xl mb-4 border border-red-600/10 shadow-[0_0_20px_rgba(229,9,20,0.1)] group"
+            className="inline-flex items-center justify-center w-10 h-10 bg-red-600/5 rounded-xl mb-2 border border-red-600/10 shadow-[0_0_20px_rgba(229,9,20,0.1)] group"
           >
-            <ShieldCheck className="text-red-600 w-6 h-6 sm:w-8 sm:h-8 drop-shadow-[0_0_10px_rgba(229,9,20,0.5)]" />
+            <ShieldCheck className="text-red-600 w-4 h-4 drop-shadow-[0_0_10px_rgba(229,9,20,0.5)]" />
           </motion.div>
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-black tracking-tighter uppercase mb-1 bg-gradient-to-b from-white to-zinc-500 bg-clip-text text-transparent italic">
-            Member Login
+          <h2 className="text-lg sm:text-xl font-black tracking-tighter uppercase mb-0.5 bg-gradient-to-b from-white to-zinc-500 bg-clip-text text-transparent italic">
+            {isRegistering ? 'Create Account' : 'Member Login'}
           </h2>
-          <p className="text-zinc-600 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.4em] opacity-80">Credentials Required</p>
+          <p className="text-zinc-600 text-[7px] sm:text-[8px] font-black uppercase tracking-[0.4em] opacity-80">
+            {isRegistering ? 'Submit your details' : 'Credentials Required'}
+          </p>
         </div>
 
-        <form onSubmit={handleVerify} className="space-y-4">
-          <motion.div variants={itemVariants} className="space-y-2">
+        <form onSubmit={isRegistering ? handleRegister : handleVerify} className="space-y-2.5">
+          {isRegistering && (
+            <motion.div variants={itemVariants} className="space-y-1">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[7px] font-black text-zinc-600 uppercase tracking-[0.4em]">Official Name</label>
+                <Tv2 className="w-2 h-2 text-red-600/30" />
+              </div>
+              <div className="relative group">
+                <div className="absolute inset-0 bg-red-600/5 rounded-lg blur-md group-focus-within:bg-red-600/10 transition-all opacity-0 group-focus-within:opacity-100" />
+                <input 
+                  type="text" 
+                  value={registerData.name}
+                  onChange={(e) => setRegisterData({...registerData, name: e.target.value})}
+                  placeholder="Full Name"
+                  className="relative w-full bg-black/40 border border-white/5 rounded-lg py-2 px-4 text-xs font-black focus:border-red-600 focus:bg-black/60 outline-none transition-all placeholder:text-zinc-800 text-white"
+                />
+              </div>
+            </motion.div>
+          )}
+
+          {isRegistering && (
+            <motion.div variants={itemVariants} className="space-y-1">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[7px] font-black text-zinc-600 uppercase tracking-[0.4em]">Plan</label>
+                <Tv2 className="w-2 h-2 text-red-600/30" />
+              </div>
+              <div className="relative group">
+                <div className="absolute inset-0 bg-red-600/5 rounded-lg blur-md group-focus-within:bg-red-600/10 transition-all opacity-0 group-focus-within:opacity-100" />
+                <select 
+                  value={registerData.plan}
+                  onChange={(e) => setRegisterData({...registerData, plan: e.target.value})}
+                  className="relative w-full bg-black/40 border border-white/5 rounded-lg py-2 px-4 text-[10px] font-black focus:border-red-600 focus:bg-black/60 outline-none transition-all text-white appearance-none cursor-pointer"
+                >
+                  <option className="bg-[#111] text-white" value="Weekly (19 RS)">Weekly (19 RS)</option>
+                  <option className="bg-[#111] text-white" value="Monthly (55 RS)">Monthly (55 RS)</option>
+                  <option className="bg-[#111] text-white" value="90 Days (149 RS)">90 Days (149 RS)</option>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-red-600 pointer-events-none" />
+              </div>
+            </motion.div>
+          )}
+
+          <motion.div variants={itemVariants} className="space-y-1">
             <div className="flex items-center justify-between px-1">
-              <label className="text-[8px] font-black text-zinc-600 uppercase tracking-[0.4em]">User Access ID</label>
-              <UserIcon className="w-2.5 h-2.5 text-red-600/30" />
+              <label className="text-[7px] font-black text-zinc-600 uppercase tracking-[0.4em]">User Access ID</label>
+              <UserIcon className="w-2 h-2 text-red-600/30" />
             </div>
             <div className="relative group">
-              <div className="absolute inset-0 bg-red-600/5 rounded-xl blur-md group-focus-within:bg-red-600/10 transition-all opacity-0 group-focus-within:opacity-100" />
+              <div className="absolute inset-0 bg-red-600/5 rounded-lg blur-md group-focus-within:bg-red-600/10 transition-all opacity-0 group-focus-within:opacity-100" />
               <input 
                 type="text" 
-                value={userId}
-                onChange={(e) => setUserId(e.target.value)}
+                value={isRegistering ? registerData.userId : userId}
+                onChange={(e) => isRegistering ? setRegisterData({...registerData, userId: e.target.value}) : setUserId(e.target.value)}
                 placeholder="Username"
-                className="relative w-full bg-black/40 border border-white/5 rounded-xl py-3.5 px-6 text-sm sm:text-base font-black focus:border-red-600 focus:bg-black/60 outline-none transition-all placeholder:text-zinc-800 text-white"
+                className="relative w-full bg-black/40 border border-white/5 rounded-lg py-2 px-4 text-xs font-black focus:border-red-600 focus:bg-black/60 outline-none transition-all placeholder:text-zinc-800 text-white"
               />
             </div>
           </motion.div>
 
-          <motion.div variants={itemVariants} className="space-y-2">
+          <motion.div variants={itemVariants} className="space-y-1">
             <div className="flex items-center justify-between px-1">
-              <label className="text-[8px] font-black text-zinc-600 uppercase tracking-[0.4em]">Security Key</label>
-              <Lock className="w-2.5 h-2.5 text-red-600/30" />
+              <label className="text-[7px] font-black text-zinc-600 uppercase tracking-[0.4em]">Security Key</label>
+              <Lock className="w-2 h-2 text-red-600/30" />
             </div>
             <div className="relative group">
-              <div className="absolute inset-0 bg-red-600/5 rounded-xl blur-md group-focus-within:bg-red-600/10 transition-all opacity-0 group-focus-within:opacity-100" />
+              <div className="absolute inset-0 bg-red-600/5 rounded-lg blur-md group-focus-within:bg-red-600/10 transition-all opacity-0 group-focus-within:opacity-100" />
               <input 
                 type="password" 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={isRegistering ? registerData.password : password}
+                onChange={(e) => isRegistering ? setRegisterData({...registerData, password: e.target.value}) : setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="relative w-full bg-black/40 border border-white/5 rounded-xl py-3.5 px-6 text-sm sm:text-base font-black focus:border-red-600 focus:bg-black/60 outline-none transition-all placeholder:text-zinc-800 text-white"
+                className="relative w-full bg-black/40 border border-white/5 rounded-lg py-2 px-4 text-xs font-black focus:border-red-600 focus:bg-black/60 outline-none transition-all placeholder:text-zinc-800 text-white"
               />
             </div>
           </motion.div>
@@ -180,7 +279,7 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
             <motion.div 
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
-              className="text-red-500 text-[8px] font-black text-center bg-red-500/5 py-3 rounded-xl border border-red-500/10 uppercase tracking-[0.2em]"
+              className="text-red-500 text-[7px] font-black text-center bg-red-500/5 py-1.5 rounded-lg border border-red-500/10 uppercase tracking-[0.2em]"
             >
                {error}
             </motion.div>
@@ -192,35 +291,44 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
             whileTap={{ scale: 0.99 }}
             type="submit"
             disabled={isVerifying}
-            className="w-full relative group overflow-hidden mt-2"
+            className="w-full relative group overflow-hidden mt-0.5"
           >
             <div className="absolute inset-0 bg-red-600 transition-all group-hover:bg-red-700 active:opacity-90" />
-            <div className="relative bg-transparent h-full font-black py-4 rounded-xl text-white uppercase tracking-[0.4em] flex items-center justify-center gap-3 shadow-[0_5px_20px_rgba(229,9,20,0.3)]">
+            <div className="relative bg-transparent h-full font-black py-2.5 rounded-lg text-white uppercase tracking-[0.4em] flex items-center justify-center gap-2 shadow-[0_5px_20px_rgba(229,9,20,0.3)]">
               {isVerifying ? (
-                <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" />
               ) : (
                 <>
-                  <span className="text-xs">Access Content</span>
-                  <Play className="w-4 h-4 fill-current" />
+                  <span className="text-[9px] font-bold">{isRegistering ? 'SUBMIT REQUEST' : 'Access Content'}</span>
+                  <Play className="w-3 h-3 fill-current" />
                 </>
               )}
             </div>
           </motion.button>
         </form>
 
+        <motion.div variants={itemVariants} className="mt-3 text-center">
+            <button 
+              onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
+              className="text-[7.5px] font-black uppercase tracking-[0.3em] text-zinc-500 hover:text-red-500 transition-colors"
+            >
+              {isRegistering ? 'Already have account? Login' : "Don't have an account? Create One"}
+            </button>
+        </motion.div>
+
         <motion.div 
           variants={itemVariants}
-          className="mt-6 pt-6 border-t border-white/5 text-center flex flex-col items-center gap-4"
+          className="mt-4 pt-4 border-t border-white/5 text-center flex flex-col items-center gap-3"
         >
-          <p className="text-zinc-700 text-[8px] font-black uppercase tracking-[0.4em]">Subscription Support</p>
+          <p className="text-zinc-700 text-[7.5px] font-black uppercase tracking-[0.4em]">Subscription Support</p>
           <a 
-            href="https://telegram.me/primebharath" 
+            href="https://telegram.me/rajatpatidar1" 
             target="_blank" 
             rel="noreferrer"
-            className="group flex items-center gap-3 bg-white/5 px-6 py-3 rounded-xl border border-white/5 hover:border-red-600 hover:bg-red-600/10 transition-all no-underline w-full justify-center"
+            className="group flex items-center gap-2 bg-white/5 px-5 py-2.5 rounded-lg border border-white/5 hover:border-red-600 hover:bg-red-600/10 transition-all no-underline w-full justify-center"
           >
-             <Send className="w-4 h-4 text-[#229ED9] group-hover:text-red-500 transition-colors" />
-             <span className="text-white group-hover:text-red-500 transition-colors text-[8px] font-black uppercase tracking-[0.3em]">Contact Telegram Bot</span>
+             <Send className="w-3.5 h-3.5 text-[#229ED9] group-hover:text-red-500 transition-colors" />
+             <span className="text-white group-hover:text-red-500 transition-colors text-[7.5px] font-black uppercase tracking-[0.3em]">Contact Telegram Bot</span>
           </a>
         </motion.div>
       </motion.div>
@@ -403,8 +511,8 @@ const Navbar = ({
             )}
           </div>
 
-          <a href="https://t.me/primebharath1" target="_blank" rel="noreferrer" className="hidden lg:flex items-center gap-2 bg-[#229ED9] hover:bg-[#229ED9]/90 px-6 py-2.5 rounded-full text-[10px] font-black text-white shadow-xl transition-all hover:scale-105 active:scale-95 uppercase tracking-widest whitespace-nowrap">
-            <Send className="w-3 h-3 fill-current" /> Join Telegram
+          <a href="https://t.me/primebharath1" target="_blank" rel="noreferrer" className="hidden lg:flex items-center gap-2 bg-[#0088CC] hover:bg-[#0088CC]/90 px-6 py-2.5 rounded-full text-[10px] font-black text-white shadow-[0_5px_15px_rgba(0,136,204,0.3)] transition-all hover:scale-105 active:scale-95 uppercase tracking-widest whitespace-nowrap">
+            <Send className="w-3.5 h-3.5 fill-current" /> JOIN TELEGRAM
           </a>
 
           <button 
@@ -592,8 +700,8 @@ const MovieCard = ({ movie, onPlay, onToggleMyList, isInMyList, widthClass = "w-
           <div className="bg-red-600 text-white text-[8px] font-black px-2 py-0.5 rounded shadow-lg backdrop-blur-md border border-red-400/30">
             {quality}
           </div>
-          {isTrending && (
-            <div className="bg-yellow-500 text-black text-[8px] font-black px-2 py-0.5 rounded shadow-lg flex items-center gap-1">
+          {(isTrending || movie.isTrending) && (
+            <div className="bg-yellow-500 text-black text-[8px] font-black px-2 py-0.5 rounded shadow-lg flex items-center gap-1 shadow-yellow-500/20">
               <span className="animate-pulse">🔥</span> TRENDING
             </div>
           )}
@@ -628,33 +736,33 @@ const MovieCard = ({ movie, onPlay, onToggleMyList, isInMyList, widthClass = "w-
           <div className="absolute inset-y-0 left-0 w-3 bg-gradient-to-r from-zinc-950 to-transparent z-10" />
           <div className="absolute inset-y-0 right-0 w-3 bg-gradient-to-l from-zinc-950 to-transparent z-10" />
           <motion.div 
-            className="inline-block"
-            animate={{ x: ["0%", "-50%"] }}
-            transition={{ 
-              duration: Math.max(displayTitle.length * 0.3, 5), 
-              repeat: Infinity, 
-              ease: "linear",
-              repeatType: "loop"
-            }}
-            style={{ width: 'max-content' }}
-          >
-            <span className="text-white font-bold text-[10px] sm:text-xs tracking-tight transition-colors pr-8">
-              {displayTitle}
-            </span>
-            <span className="text-white font-bold text-[10px] sm:text-xs tracking-tight transition-colors pr-8">
-              {displayTitle}
-            </span>
-          </motion.div>
-        </div>
-        <div className="flex items-center gap-1.5 opacity-60">
-          <span className="text-red-500 text-[8px] font-black uppercase tracking-wider">
-            {movie.language}
+          className="inline-block"
+          animate={{ x: ["0%", "-50%"] }}
+          transition={{ 
+            duration: Math.max(displayTitle.length * 0.35, 6), 
+            repeat: Infinity, 
+            ease: "linear",
+            repeatType: "loop"
+          }}
+          style={{ width: 'max-content' }}
+        >
+          <span className="text-white font-black text-[9px] sm:text-[10px] tracking-tight transition-colors pr-8">
+            {displayTitle}
           </span>
-          <span className="w-0.5 h-0.5 bg-zinc-700 rounded-full" />
-          <span className="text-zinc-500 text-[8px] font-bold uppercase">
-             {movie.year || 'New'}
+          <span className="text-white font-black text-[9px] sm:text-[10px] tracking-tight transition-colors pr-8">
+            {displayTitle}
           </span>
-        </div>
+        </motion.div>
+      </div>
+      <div className="flex items-center gap-1.5 opacity-60">
+        <span className="text-red-500 text-[7px] font-black uppercase tracking-[0.2em]">
+          {movie.language}
+        </span>
+        <span className="w-0.5 h-0.5 bg-zinc-700 rounded-full" />
+        <span className="text-zinc-500 text-[7px] font-black uppercase">
+           {movie.year || 'New'}
+        </span>
+      </div>
       </div>
     </motion.div>
   );
@@ -675,20 +783,20 @@ const MovieRow = ({ title, movies, onToggleMyList, myList, onPlay, onViewMore, i
   };
 
   return (
-    <div className={`mb-12 group/row relative ${isTrending ? 'mt-4' : ''}`}>
-      <div className="flex items-center justify-between px-4 md:px-12 mb-4">
-        <div className="flex items-center gap-3">
-          <div className={`w-1 h-6 sm:h-8 ${isTrending ? 'bg-yellow-500 animate-pulse shadow-[0_0_15px_rgba(234,179,8,0.6)]' : 'bg-red-600'} rounded-full`} />
-          <h3 className="font-black text-white tracking-tight text-lg sm:text-xl md:text-2xl uppercase italic flex items-center gap-2">
+    <div className={`mb-8 group/row relative ${isTrending ? 'mt-3' : ''}`}>
+      <div className="flex items-center justify-between px-4 md:px-12 mb-3">
+        <div className="flex items-center gap-2">
+          <div className={`w-1 h-5 sm:h-6 ${isTrending ? 'bg-yellow-500 animate-pulse shadow-[0_0_15px_rgba(234,179,8,0.6)]' : 'bg-red-600'} rounded-full`} />
+          <h3 className="font-black text-white tracking-tighter text-base sm:text-lg md:text-xl uppercase italic flex items-center gap-2">
             {title} 
-            {isTrending && <span className="text-yellow-500 flex items-center animate-bounce ml-1"><Play className="fill-yellow-500 w-3 h-3 rotate-[-90deg]" /></span>}
+            {isTrending && <span className="text-yellow-500 flex items-center animate-bounce ml-1"><Play className="fill-yellow-500 w-2.5 h-2.5 rotate-[-90deg]" /></span>}
           </h3>
         </div>
         <button 
           onClick={() => onViewMore?.(title)}
-          className="group flex items-center gap-2 bg-white/5 hover:bg-red-600 text-white px-4 py-1.5 rounded-full text-[10px] font-black transition-all border border-white/5 hover:border-red-600 tracking-widest"
+          className="group flex items-center gap-2 bg-white/5 hover:bg-red-600 text-white px-3 py-1 rounded-full text-[9px] font-black transition-all border border-white/5 hover:border-red-600 tracking-widest uppercase italic"
         >
-          EXPLORE ALL <ChevronLeft className="rotate-180 w-3 h-3 group-hover:translate-x-1 transition-transform" />
+          Explore <ChevronLeft className="rotate-180 w-3 h-3 group-hover:translate-x-1 transition-transform" />
         </button>
       </div>
       
@@ -764,6 +872,9 @@ export default function App() {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [myListIds, setMyListIds] = useState<string[]>([]);
   const [currentView, setCurrentView] = useState<'home' | 'myList' | 'movies' | 'request' | 'profile'>('home');
+  const [newPassword, setNewPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
@@ -931,6 +1042,8 @@ export default function App() {
       });
       setCurrentUser(userData);
       setIsAuthorized(true);
+      setCurrentView('home');
+      setSelectedCategory(null);
     } catch (err) {
       console.error('Error saving authorization:', err);
       setIsAuthorized(true);
@@ -947,6 +1060,28 @@ export default function App() {
     localStorage.removeItem('bharat_prime_user_id'); // Clear local ID to force fresh identity
   };
 
+  const handleUpdatePassword = async () => {
+    if (!currentUser || !newPassword || newPassword.length < 4) {
+      toast.error("Password must be at least 4 characters");
+      return;
+    }
+    setIsUpdatingPassword(true);
+    try {
+      await updateDoc(doc(db, 'users', currentUser.userId), {
+        password: newPassword
+      });
+      setCurrentUser({ ...currentUser, password: newPassword });
+      setNewPassword('');
+      setIsChangingPassword(false);
+      toast.success("Security Key Updated Successfully");
+    } catch (error) {
+      console.error(error);
+      toast.error("Update failed");
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
+
   const handleForceLogoutAll = async () => {
     if (!window.confirm("CRITICAL: This will log out ALL USERS SYSTEM-WIDE. Proceed?")) return;
     const qSnap = await getDoc(doc(db, 'config', 'admin_pass')); // Using this as a dummy placeholder for batch ops
@@ -959,7 +1094,8 @@ export default function App() {
   const results = movies.filter(m => m.title?.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
-    <div className="min-h-screen bg-black text-white selection:bg-red-600">
+    <div className="min-h-screen bg-[#121212] text-white selection:bg-red-600">
+      <ToastContainer position="top-center" theme="dark" autoClose={3000} hideProgressBar aria-label="Notifications" />
       <AnimatePresence mode="wait">
         {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
       </AnimatePresence>
@@ -1083,13 +1219,42 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-col items-center justify-center border-t md:border-t-0 md:border-l border-white/5 pt-8 md:pt-0 md:pl-10">
-                        <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-3 italic">ACCOUNT CREDITS</p>
-                        <span className="text-5xl sm:text-6xl font-black text-white italic tracking-tighter mb-4 drop-shadow-[0_0_30px_rgba(255,255,255,0.1)]">
-                          ₹{currentUser?.balance || '0'}
-                        </span>
-                        <div className="bg-red-600/10 border border-red-600/20 px-4 py-1 rounded-full">
-                           <p className="text-[8px] text-red-600 font-black uppercase tracking-widest">Cinema Ready</p>
-                        </div>
+                         <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-6 italic">SECURE PASSWORD CONTROL</p>
+                         {!isChangingPassword ? (
+                           <button 
+                             onClick={() => setIsChangingPassword(true)}
+                             className="bg-red-600/10 hover:bg-red-600 border border-red-600/20 text-red-600 hover:text-white px-8 py-3 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2 group"
+                           >
+                             <Lock size={12} className="group-hover:rotate-12 transition-transform" /> CHANGE SECURITY KEY
+                           </button>
+                         ) : (
+                           <div className="w-full space-y-3">
+                             <div className="relative group">
+                               <input 
+                                 type="text" 
+                                 value={newPassword}
+                                 onChange={(e) => setNewPassword(e.target.value)}
+                                 placeholder="Enter New Password"
+                                 className="w-full bg-black/60 border border-white/10 rounded-xl py-3 px-4 text-xs font-black focus:border-red-600 outline-none transition-all text-white placeholder:text-zinc-800"
+                               />
+                             </div>
+                             <div className="flex gap-2">
+                               <button 
+                                 onClick={handleUpdatePassword}
+                                 disabled={isUpdatingPassword}
+                                 className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all disabled:opacity-50"
+                               >
+                                 {isUpdatingPassword ? 'UPDATING...' : 'CONFIRM UPDATE'}
+                               </button>
+                               <button 
+                                 onClick={() => { setIsChangingPassword(false); setNewPassword(''); }}
+                                 className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-4 rounded-xl transition-all"
+                               >
+                                 <X size={14} />
+                               </button>
+                             </div>
+                           </div>
+                         )}
                     </div>
                   </div>
                 </div>
@@ -1279,10 +1444,10 @@ export default function App() {
                 <HeroBanner movies={movies} onPlay={handlePlay} />
                 <div className="pb-20 mt-4 sm:mt-8">
                   {/* Trending Section */}
-                  {movies.length > 0 && (
+                  {movies.filter(m => m.isTrending).length > 0 && (
                     <MovieRow 
                       title="Trending Now" 
-                      movies={movies.slice(0, 10)} 
+                      movies={movies.filter(m => m.isTrending).slice(0, 10)} 
                       myList={movies.filter(m => myListIds.includes(m.id))}
                       onPlay={handlePlay}
                       onInfo={handlePlay}
@@ -1326,11 +1491,16 @@ export default function App() {
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-zinc-900 p-10 rounded-2xl border border-white/10 text-center max-w-sm">
-              <Bell className="mx-auto text-red-600 mb-4 animate-bounce" size={48} />
-              <h2 className="text-2xl font-bold mb-2">Web Series Coming Soon</h2>
-              <p className="text-gray-400 mb-6">We are currently curating the best series for you.</p>
-              <button onClick={() => setIsModalOpen(false)} className="w-full bg-red-600 py-3 rounded-lg font-bold">Close</button>
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-zinc-950 p-8 rounded-2xl border border-white/10 text-center max-w-sm shadow-2xl">
+              <Bell className="mx-auto text-red-600 mb-3 animate-bounce" size={40} />
+              <h2 className="text-xl font-black mb-1 text-white italic uppercase tracking-tighter">Web Series Soon</h2>
+              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mb-6">Curating the best content</p>
+              <button 
+                onClick={() => setIsModalOpen(false)} 
+                className="w-full bg-red-600 py-3 rounded-lg font-black text-xs uppercase tracking-widest hover:bg-red-700 transition-colors"
+              >
+                Close
+              </button>
             </motion.div>
           </div>
         )}

@@ -5,10 +5,12 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Movie, User } from '../types';
+import { checkIsTrending } from '../lib/gemini';
 import { 
   LayoutGrid, PlusCircle, ShieldCheck, Search, Pencil, Trash2, X, 
   Menu, Play, Trash, Check, Globe, Calendar, FileText,
-  Clapperboard, ListVideo, AlertTriangle, BrainCircuit, TrendingDown, TrendingUp, Scan
+  Clapperboard, ListVideo, AlertTriangle, BrainCircuit, TrendingDown, TrendingUp, Scan,
+  CircleUser, RefreshCcw, Sparkles, ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast, ToastContainer } from 'react-toastify';
@@ -16,7 +18,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import Tesseract from 'tesseract.js';
 import 'react-toastify/dist/ReactToastify.css';
 
-type ViewType = 'dashboard' | 'upload' | 'users' | 'requests' | 'security';
+type ViewType = 'dashboard' | 'upload' | 'users' | 'requests' | 'security' | 'registrations';
 
 export default function AdminPanel({ 
   onClose, 
@@ -59,11 +61,14 @@ export default function AdminPanel({
 
   const [movies, setMovies] = useState<Movie[]>([]);
   const [movieRequests, setMovieRequests] = useState<any[]>([]);
+  const [memberRequests, setMemberRequests] = useState<any[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUserSubmitting, setIsUserSubmitting] = useState(false);
   const [isOcrLoading, setIsOcrLoading] = useState(false);
+  const [isAnalyzingAll, setIsAnalyzingAll] = useState(false);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
 
   // Financial Stats State
   const [financeStats, setFinanceStats] = useState({
@@ -107,6 +112,15 @@ export default function AdminPanel({
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setUsers(list);
       calculateFinance(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "registrationRequests"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMemberRequests(list);
     });
     return () => unsubscribe();
   }, []);
@@ -508,12 +522,108 @@ export default function AdminPanel({
     totalUsers: users.length
   };
 
+  const handleApproveRegistration = async (req: any) => {
+    try {
+      const batch = writeBatch(db);
+      const userRef = doc(db, "users", req.userId);
+      const reqRef = doc(db, "registrationRequests", req.id);
+      
+      const planRaw = req.plan || 'Weekly (19 RS)';
+      let days = 7;
+      let price = '₹19';
+      let planName = 'Weekly (19 RS)';
+
+      if (planRaw.includes('Monthly')) {
+        days = 30;
+        price = '₹55';
+        planName = 'Monthly (55 RS)';
+      } else if (planRaw.includes('90')) {
+        days = 90;
+        price = '₹149';
+        planName = '90 Days (149 RS)';
+      }
+
+      batch.set(userRef, {
+        name: req.name,
+        password: req.password,
+        planName: planName,
+        planPrice: price,
+        startDate: new Date().toISOString().split('T')[0],
+        expiryDate: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        createdAt: serverTimestamp(),
+        isActive: true
+      });
+      
+      batch.delete(reqRef);
+      await batch.commit();
+      toast.success(`Account approved for ${req.userId}`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Approval failed");
+    }
+  };
+
+  const handleRejectRegistration = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "registrationRequests", id));
+      toast.info("Request rejected");
+    } catch (err) {
+      console.error(err);
+      toast.error("Rejection failed");
+    }
+  };
+
+  const handleSyncTrend = async (movie: Movie) => {
+    setAnalyzingId(movie.id);
+    try {
+      const result = await checkIsTrending(movie.title, movie.year || '2024');
+      await updateDoc(doc(db, 'movies', movie.id), {
+        isTrending: result.isTrending,
+        trendAnalyzedAt: serverTimestamp()
+      });
+      if (result.isTrending) {
+        toast.success(`${movie.title} is now Trending!`);
+      } else {
+        toast.info(`${movie.title} status updated.`);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Trend analysis failed");
+    } finally {
+      setAnalyzingId(null);
+    }
+  };
+
+  const handleSyncAllTrends = async () => {
+    if (movies.length === 0) return;
+    setIsAnalyzingAll(true);
+    let trendingCount = 0;
+    try {
+      toast.info("Analyzing global trends...");
+      for (const movie of movies) {
+        // Skip recently analyzed ones if you want, but for now we sync all
+        const result = await checkIsTrending(movie.title, movie.year || '2024');
+        await updateDoc(doc(db, 'movies', movie.id), {
+          isTrending: result.isTrending,
+          trendAnalyzedAt: serverTimestamp()
+        });
+        if (result.isTrending) trendingCount++;
+      }
+      toast.success(`Analysis complete! ${trendingCount} movies are trending.`);
+    } catch (error) {
+      console.error(error);
+      toast.error("Bulk sync failed");
+    } finally {
+      setIsAnalyzingAll(false);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-[500] bg-[#0a0a0a] text-white font-sans flex overflow-hidden">
+    <div className="fixed inset-0 z-[500] bg-[#121212] text-white font-sans flex overflow-hidden">
       <ToastContainer position="top-right" theme="dark" aria-label="Notifications" />
       
       {/* Sidebar */}
-      <aside className={`bg-[#111] border-r border-[#222] transition-all duration-300 flex flex-col z-[510] ${isSidebarCollapsed ? 'w-0 -translate-x-full md:w-20 md:translate-x-0' : 'w-full md:w-[280px]'}`}>
+      <aside className={`bg-[#0d0d0d] border-r border-[#222] transition-all duration-300 flex flex-col z-[510] ${isSidebarCollapsed ? 'w-0 -translate-x-full md:w-20 md:translate-x-0' : 'w-full md:w-[280px]'}`}>
         <div className="p-4 h-16 border-b border-[#222] flex items-center justify-between">
           {!isSidebarCollapsed && <span className="text-[#e50914] font-black text-sm tracking-widest italic">BHARAT PRIME | ELITE</span>}
           <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="p-2 hover:bg-white/5 rounded-lg md:hidden">
@@ -542,6 +652,20 @@ export default function AdminPanel({
           >
             <ShieldCheck size={16} />
             {!isSidebarCollapsed && <span>Members</span>}
+          </button>
+          <button 
+            onClick={() => { setActiveView('registrations'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
+            className={`w-full flex items-center justify-between p-3 rounded-lg transition-all font-black text-[9px] uppercase tracking-widest ${activeView === 'registrations' ? 'bg-[#1f1f1f] text-white border-l-2 border-[#e50914]' : 'text-[#555] hover:bg-[#1f1f1f] hover:text-white'}`}
+          >
+            <div className="flex items-center gap-3">
+              <CircleUser size={16} />
+              {!isSidebarCollapsed && <span>Member Requests</span>}
+            </div>
+            {!isSidebarCollapsed && memberRequests.length > 0 && (
+              <span className="bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black animate-pulse">
+                {memberRequests.length}
+              </span>
+            )}
           </button>
           <button 
             onClick={() => { setActiveView('requests'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
@@ -748,33 +872,33 @@ export default function AdminPanel({
             {activeView === 'upload' && (
               <motion.div 
                 key="upload"
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="bg-[#141414] border border-[#222] p-8 rounded-[2rem] shadow-2xl"
+                exit={{ opacity: 0, y: -10 }}
+                className="bg-[#141414] border border-[#222] p-5 rounded-2xl shadow-2xl"
               >
-                <h4 className="text-xl font-black mb-8 flex items-center gap-3 italic">
-                  <PlusCircle className="text-[#e50914]" /> {editId ? 'UPDATE CONTENT' : 'PUBLISH CONTENT'}
+                <h4 className="text-sm font-black mb-5 flex items-center gap-3 italic">
+                  <PlusCircle className="text-[#e50914]" size={18} /> {editId ? 'UPDATE CONTENT' : 'PUBLISH CONTENT'}
                 </h4>
-                <form onSubmit={handleSubmit} className="space-y-8">
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    <div className="space-y-2 lg:col-span-2">
-                      <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Title</label>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    <div className="space-y-1.5 lg:col-span-2">
+                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Title</label>
                       <input 
                         type="text" 
                         value={formData.title}
                         onChange={e => setFormData({...formData, title: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-sm font-medium"
+                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium"
                         placeholder="Movie Name"
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Print Quality</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Print Quality</label>
                       <select 
                         value={formData.quality}
                         onChange={e => setFormData({...formData, quality: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-sm font-medium appearance-none"
+                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium appearance-none"
                       >
                         <option value="HD">HD</option>
                         <option value="HQ">HQ</option>
@@ -783,34 +907,34 @@ export default function AdminPanel({
                       </select>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Release Year</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Release Year</label>
                       <input 
                         type="text" 
                         value={formData.year}
                         onChange={e => setFormData({...formData, year: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-sm font-medium"
+                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium"
                         placeholder="Ex: 2026"
                       />
                     </div>
                     
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Image URL</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Image URL</label>
                       <input 
                         type="text" 
                         value={formData.image}
                         onChange={e => setFormData({...formData, image: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-sm font-medium"
+                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium"
                         placeholder="https://..."
                       />
                     </div>
                     
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Category</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Category</label>
                       <select 
                         value={formData.category}
                         onChange={e => setFormData({...formData, category: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-sm font-medium appearance-none"
+                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium appearance-none"
                       >
                         <option value="Movie">Movie</option>
                         <option value="Series">Web Series</option>
@@ -819,12 +943,12 @@ export default function AdminPanel({
                     </div>
 
                       {formData.category !== 'Banner' && (
-                        <div className="space-y-2 lg:col-span-3">
-                          <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Audio Language</label>
+                        <div className="space-y-1.5 lg:col-span-3">
+                          <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Audio Language</label>
                           <select 
                             value={formData.language}
                             onChange={e => setFormData({...formData, language: e.target.value})}
-                            className="w-full bg-[#111] border border-[#222] rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-sm font-bold appearance-none"
+                            className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-bold appearance-none"
                           >
                             <option value="Kannada">Kannada</option>
                             <option value="Tamil">Tamil</option>
@@ -838,31 +962,31 @@ export default function AdminPanel({
                       )}
                   </div>
 
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Streaming Links</label>
-                    <div className="space-y-3">
+                  <div className="space-y-3">
+                    <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Streaming Links</label>
+                    <div className="space-y-2">
                       {formData.links.map((link, idx) => (
-                        <div key={idx} className="flex gap-3">
+                        <div key={idx} className="flex gap-2">
                           <input 
                             type="text" 
                             value={link.label}
                             onChange={e => updateLink(idx, 'label', e.target.value)}
-                            className="w-32 bg-[#1f1f1f] border border-[#333] rounded-xl py-3 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-bold"
+                            className="w-24 bg-[#1f1f1f] border border-[#333] rounded-lg py-2 px-3 focus:border-[#e50914] outline-none transition-all text-[10px] font-bold"
                             placeholder="720p"
                           />
                           <input 
                             type="text" 
                             value={link.url}
                             onChange={e => updateLink(idx, 'url', e.target.value)}
-                            className="flex-1 bg-[#1f1f1f] border border-[#333] rounded-xl py-3 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium"
+                            className="flex-1 bg-[#1f1f1f] border border-[#333] rounded-lg py-2 px-3 focus:border-[#e50914] outline-none transition-all text-[10px] font-medium"
                             placeholder="URL"
                           />
                           <button 
                             type="button"
                             onClick={() => removeLinkRow(idx)}
-                            className="p-3 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors"
+                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
                           >
-                            <Trash2 size={20} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       ))}
@@ -870,17 +994,17 @@ export default function AdminPanel({
                     <button 
                       type="button" 
                       onClick={addLinkRow}
-                      className="text-[10px] font-black text-[#888] hover:text-white uppercase tracking-widest flex items-center gap-2 transition-colors"
+                      className="text-[9px] font-black text-[#888] hover:text-white uppercase tracking-widest flex items-center gap-2 transition-colors"
                     >
-                      <PlusCircle size={14} /> Add Row
+                      <PlusCircle size={12} /> Add Row
                     </button>
                   </div>
 
-                  <div className="flex gap-4 pt-6">
+                  <div className="flex gap-4 pt-4">
                     <button 
                       type="submit" 
                       disabled={isSubmitting}
-                      className="flex-1 bg-[#e50914] hover:bg-[#ff0f1a] disabled:bg-[#8b0000] text-white font-black py-5 rounded-2xl transition-all shadow-[0_0_30px_rgba(229,9,20,0.3)] active:scale-95 uppercase tracking-widest"
+                      className="flex-1 bg-[#e50914] hover:bg-[#ff0f1a] disabled:bg-[#8b0000] text-white font-black py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(229,9,20,0.3)] active:scale-95 uppercase tracking-widest text-xs"
                     >
                       {isSubmitting ? 'PROCESSING...' : (editId ? 'UPDATE NOW' : 'PUBLISH NOW')}
                     </button>
@@ -888,7 +1012,7 @@ export default function AdminPanel({
                       <button 
                         type="button" 
                         onClick={resetForm}
-                        className="px-10 bg-[#222] hover:bg-[#333] text-white font-black rounded-2xl transition-all active:scale-95 uppercase tracking-widest"
+                        className="px-8 bg-[#222] hover:bg-[#333] text-white font-black rounded-xl transition-all active:scale-95 uppercase tracking-widest text-xs"
                       >
                         DISCARD
                       </button>
@@ -901,33 +1025,33 @@ export default function AdminPanel({
             {activeView === 'users' && (
               <motion.div 
                 key="users"
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-10"
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
               >
                 {/* User Form */}
-                <div className="bg-[#141414] border border-[#222] p-8 rounded-[2rem] shadow-2xl">
-                  <div className="flex justify-between items-center mb-8">
-                    <h4 className="text-xl font-black flex items-center gap-3 italic text-purple-500 tracking-tighter">
-                      <ShieldCheck /> {userEditId ? 'UPDATE USER ACCOUNT' : 'MEMBER REGISTRATION'}
+                <div className="bg-[#141414] border border-[#222] p-5 rounded-2xl shadow-2xl">
+                  <div className="flex justify-between items-center mb-5">
+                    <h4 className="text-sm font-black flex items-center gap-3 italic text-purple-500 tracking-tighter uppercase">
+                      <ShieldCheck size={18} /> {userEditId ? 'UPDATE USER ACCOUNT' : 'MEMBER REGISTRATION'}
                     </h4>
                     {!userEditId && (
                       <button 
                         type="button"
                         onClick={() => setUserFormData({...userFormData, password: Math.random().toString(36).slice(-8).toUpperCase()})}
-                        className="text-[10px] font-black text-[#888] hover:text-white uppercase tracking-widest transition-colors flex items-center gap-2"
+                        className="text-[9px] font-black text-[#888] hover:text-white uppercase tracking-widest transition-colors flex items-center gap-2"
                       >
-                        <PlusCircle size={14} /> Auto-Generate Pass
+                        <PlusCircle size={12} /> Auto-Generate Pass
                       </button>
                     )}
                   </div>
                   
-                  <form onSubmit={handleUserSubmit} className="space-y-8">
-                    <div className="grid md:grid-cols-3 gap-8">
+                  <form onSubmit={handleUserSubmit} className="space-y-5">
+                    <div className="grid md:grid-cols-3 gap-5">
                       {!userEditId && (
                         <div className="md:col-span-1">
-                          <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1 mb-2 block">Scan Payment Receipt (OCR)</label>
+                          <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1 mb-1.5 block">Scan Receipt (OCR)</label>
                           <div className="relative">
                             <input 
                               type="file" 
@@ -938,56 +1062,56 @@ export default function AdminPanel({
                             />
                             <label 
                               htmlFor="receipt-upload"
-                              className="w-full flex items-center justify-center gap-3 p-5 border-2 border-dashed border-[#333] hover:border-blue-500/50 rounded-2xl cursor-pointer transition-all bg-[#1a1a1a]/50 group h-[120px]"
+                              className="w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-[#333] hover:border-blue-500/50 rounded-xl cursor-pointer transition-all bg-[#1a1a1a]/50 group h-[80px]"
                             >
                               {isOcrLoading ? (
                                 <div className="flex flex-col items-center gap-1 text-blue-500 animate-pulse">
-                                  <Scan size={20} className="animate-spin" />
-                                  <span className="text-[9px] font-black uppercase tracking-widest">SCANNING...</span>
+                                  <Scan size={16} className="animate-spin" />
+                                  <span className="text-[8px] font-black uppercase tracking-widest">SCANNING...</span>
                                 </div>
                               ) : (
-                                <div className="flex flex-col items-center gap-1">
-                                  <Scan size={20} className="text-[#444] group-hover:text-blue-500 transition-colors" />
-                                  <span className="text-[9px] font-black text-[#444] group-hover:text-white transition-colors uppercase tracking-widest text-center px-4">UPLOAD RECEIPT</span>
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <Scan size={16} className="text-[#444] group-hover:text-blue-500 transition-colors" />
+                                  <span className="text-[8px] font-black text-[#444] group-hover:text-white transition-colors uppercase tracking-widest text-center px-4">UPLOAD</span>
                                 </div>
                               )}
                             </label>
                           </div>
-                        </div>
-                      )}
-
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Transaction ID</label>
-                        <input 
-                          type="text" 
-                          value={userFormData.trxId}
-                          onChange={e => setUserFormData({...userFormData, trxId: e.target.value})}
-                          className="w-full bg-[#111] border border-[#222] rounded-xl py-4 px-5 focus:border-blue-500 outline-none transition-all text-sm font-bold h-[120px]"
-                          placeholder="EX: BP_99..."
-                        />
                       </div>
+                    )}
 
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Amount Paid</label>
-                        <input 
-                          type="number" 
-                          value={userFormData.planPrice.replace(/[^0-9]/g, '')}
-                          onChange={e => {
-                            const val = e.target.value;
-                            let plan = 'Weekly (19 RS)';
-                            if(val === '149') plan = '90 Days (149 RS)';
-                            else if(val === '55') plan = 'Monthly (55 RS)';
-                            
-                            setUserFormData({...userFormData, planPrice: `₹${val}`, planName: plan});
-                          }}
-                          className="w-full bg-[#111] border border-[#222] rounded-xl py-4 px-5 focus:border-blue-500 outline-none transition-all text-sm font-bold h-[120px]"
-                          placeholder="149"
-                        />
-                      </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Transaction ID</label>
+                      <input 
+                        type="text" 
+                        value={userFormData.trxId}
+                        onChange={e => setUserFormData({...userFormData, trxId: e.target.value})}
+                        className={`w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold ${!userEditId ? 'h-[80px]' : ''}`}
+                        placeholder="EX: BP_99..."
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Amount Paid</label>
+                      <input 
+                        type="number" 
+                        value={userFormData.planPrice.replace(/[^0-9]/g, '')}
+                        onChange={e => {
+                          const val = e.target.value;
+                          let plan = 'Weekly (19 RS)';
+                          if(val === '149') plan = '90 Days (149 RS)';
+                          else if(val === '55') plan = 'Monthly (55 RS)';
+                          
+                          setUserFormData({...userFormData, planPrice: `₹${val}`, planName: plan});
+                        }}
+                        className={`w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold ${!userEditId ? 'h-[80px]' : ''}`}
+                        placeholder="149"
+                      />
+                    </div>
 
                       {/* Credentials Row */}
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">User ID</label>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">User ID</label>
                         <input 
                           type="text" 
                           value={userFormData.userId}
@@ -1008,7 +1132,7 @@ export default function AdminPanel({
                               setIsRenewalMode(false);
                             }
                           }}
-                          className={`w-full bg-[#111] border ${isRenewalMode ? 'border-blue-500' : 'border-[#222]'} rounded-xl py-4 px-5 focus:border-blue-500 outline-none transition-all text-sm font-bold`}
+                          className={`w-full bg-[#111] border ${isRenewalMode ? 'border-blue-500' : 'border-[#222]'} rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold`}
                           placeholder="bp_user_123"
                           disabled={!!userEditId}
                         />
@@ -1019,8 +1143,8 @@ export default function AdminPanel({
                         )}
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Full Name</label>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Full Name</label>
                         <input 
                           type="text" 
                           value={userFormData.name}
@@ -1030,8 +1154,8 @@ export default function AdminPanel({
                         />
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Password</label>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Password</label>
                         <input 
                           type="text" 
                           value={userFormData.password}
@@ -1041,31 +1165,33 @@ export default function AdminPanel({
                         />
                       </div>
 
-                      {/* Plan Logic */}
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Subscription Plan</label>
-                        <select 
-                          value={userFormData.planName}
-                          onChange={e => {
-                            const val = e.target.value;
-                            let price = '₹19';
-                            let days = 7;
-                            if (val === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
-                            if (val === '90 Days (149 RS)') { price = '₹149'; days = 90; }
-                            
-                            const expiry = new Date(new Date(userFormData.startDate).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                            setUserFormData({...userFormData, planName: val, planPrice: price, expiryDate: expiry});
-                          }}
-                          className="w-full bg-[#111] border border-[#222] rounded-xl py-4 px-5 focus:border-blue-500 outline-none transition-all text-sm font-bold appearance-none"
-                        >
-                          <option value="Weekly (19 RS)">Weekly (19 RS)</option>
-                          <option value="Monthly (55 RS)">Monthly (55 RS)</option>
-                          <option value="90 Days (149 RS)">90 Days (149 RS)</option>
-                        </select>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Subscription Plan</label>
+                        <div className="relative group">
+                          <select 
+                            value={userFormData.planName}
+                            onChange={e => {
+                              const val = e.target.value;
+                              let price = '₹19';
+                              let days = 7;
+                              if (val === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
+                              if (val === '90 Days (149 RS)') { price = '₹149'; days = 90; }
+                              
+                              const expiry = new Date(new Date(userFormData.startDate).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                              setUserFormData({...userFormData, planName: val, planPrice: price, expiryDate: expiry});
+                            }}
+                            className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold appearance-none cursor-pointer"
+                          >
+                            <option value="Weekly (19 RS)">Weekly (19 RS)</option>
+                            <option value="Monthly (55 RS)">Monthly (55 RS)</option>
+                            <option value="90 Days (149 RS)">90 Days (149 RS)</option>
+                          </select>
+                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-[#555] pointer-events-none group-hover:text-blue-500 transition-colors" />
+                        </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Start Date</label>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Start Date</label>
                         <input 
                           type="date" 
                           value={userFormData.startDate}
@@ -1077,17 +1203,17 @@ export default function AdminPanel({
                             const expiry = new Date(new Date(start).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
                             setUserFormData({...userFormData, startDate: start, expiryDate: expiry});
                           }}
-                          className="w-full bg-[#111] border border-[#222] rounded-xl py-4 px-5 focus:border-blue-500 outline-none transition-all text-sm font-bold"
+                          className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold"
                         />
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-[#555] uppercase tracking-widest ml-1">Expiry Date</label>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Expiry Date</label>
                         <input 
                           type="date" 
                           value={userFormData.expiryDate}
                           onChange={e => setUserFormData({...userFormData, expiryDate: e.target.value})}
-                          className="w-full bg-[#111] border border-[#222] rounded-xl py-4 px-5 focus:border-blue-500 outline-none transition-all text-sm font-bold"
+                          className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold"
                         />
                       </div>
                     </div>
@@ -1168,6 +1294,79 @@ export default function AdminPanel({
                       </tbody>
                     </table>
                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeView === 'registrations' && (
+              <motion.div 
+                key="registrations"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="space-y-6"
+              >
+                <div className="flex justify-between items-center mb-6">
+                  <h4 className="text-sm font-black italic flex items-center gap-3 uppercase tracking-widest text-[#e50914]">
+                    <CircleUser size={18} /> MEMBER APPROVAL CENTER
+                  </h4>
+                </div>
+
+                <div className="grid gap-3">
+                  {memberRequests.length === 0 ? (
+                    <div className="bg-[#111] border border-[#222] p-12 rounded-2xl text-center text-[#444] font-black uppercase tracking-[0.4em] text-[10px]">
+                      No Pending Account Requests
+                    </div>
+                  ) : (
+                    memberRequests.map((req) => (
+                      <div 
+                        key={req.id} 
+                        className="bg-[#0d0d0d] border border-[#222] p-5 rounded-2xl transition-all hover:border-white/10 group shadow-lg"
+                      >
+                        <div className="flex flex-col md:flex-row justify-between gap-5">
+                          <div className="flex-1 space-y-2">
+                            <div className="flex items-center gap-3">
+                              <span className="text-zinc-600 text-[8px] font-black uppercase tracking-widest">Candidate:</span>
+                              <h5 className="text-[14px] font-black text-white uppercase italic tracking-tighter">{req.name}</h5>
+                            </div>
+                            <div className="flex flex-wrap gap-4 pt-2">
+                              <div className="flex flex-col">
+                                <span className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mb-1">Proposed ID</span>
+                                <code className="text-[#3498db] text-xs font-bold uppercase bg-[#3498db]/5 px-2 py-1 rounded border border-[#3498db]/10">{req.userId}</code>
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mb-1">Access Key</span>
+                                <code className="text-[#f1c40f] text-xs font-bold uppercase bg-[#f1c40f]/5 px-2 py-1 rounded border border-[#f1c40f]/10">{req.password}</code>
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mb-1">Proposed Plan</span>
+                                <span className="text-[10px] font-black text-white bg-red-600/20 border border-red-600/30 px-3 py-1 rounded-lg uppercase tracking-tighter italic">
+                                  {req.plan || 'Weekly (19 RS)'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-[8px] font-black text-zinc-800 uppercase tracking-widest pt-2">
+                               Requested: {req.timestamp?.toDate().toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) || 'Just Now'}
+                            </div>
+                          </div>
+                          <div className="flex flex-row md:flex-col gap-2 justify-end">
+                            <button 
+                              onClick={() => handleApproveRegistration(req)}
+                              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-green-600/10 hover:bg-green-600 text-green-500 hover:text-white border border-green-600/20 px-6 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all"
+                            >
+                              <Check size={14} /> Approve
+                            </button>
+                            <button 
+                              onClick={() => handleRejectRegistration(req.id)}
+                              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white border border-red-600/20 px-6 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all"
+                            >
+                              <X size={14} /> Reject
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </motion.div>
             )}
@@ -1331,9 +1530,19 @@ export default function AdminPanel({
           {/* Live Logs Section - Always visible at bottom */}
           <section className="mt-20">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-              <h5 className="text-xl font-black italic flex items-center gap-3">
-                <ListVideo className="text-[#e50914]" /> LIVE LOGS
-              </h5>
+              <div className="flex items-center gap-4">
+                <h5 className="text-xl font-black italic flex items-center gap-3">
+                  <ListVideo className="text-[#e50914]" /> LIVE LOGS
+                </h5>
+                <button 
+                  onClick={handleSyncAllTrends}
+                  disabled={isAnalyzingAll}
+                  className="bg-blue-600/10 border border-blue-600/30 text-blue-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-blue-600 hover:text-white transition-all disabled:opacity-50"
+                >
+                  <RefreshCcw size={14} className={isAnalyzingAll ? 'animate-spin' : ''} />
+                  {isAnalyzingAll ? 'ANALYZING...' : 'SYNC GLOBAL TRENDS'}
+                </button>
+              </div>
               
               <div className="flex bg-[#111] p-1 rounded-xl border border-[#222] overflow-x-auto no-scrollbar">
                 {['All', 'Movie', 'Series', 'Banner'].map((filter) => (
@@ -1374,6 +1583,11 @@ export default function AdminPanel({
                                 {movie.title} <span className="text-[#555] text-xs font-bold">({movie.quality || 'N/A'})</span>
                               </div>
                               {movie.year && <span className="text-[#555] text-xs font-bold">({movie.year})</span>}
+                              {movie.isTrending && (
+                                <span className="bg-gradient-to-r from-orange-500 to-red-600 text-white text-[7px] font-black px-2 py-0.5 rounded italic uppercase tracking-tighter shadow-lg shadow-red-600/20 flex items-center gap-1">
+                                  <Sparkles size={8} /> TRENDING
+                                </span>
+                              )}
                             </div>
                             <div className="flex flex-wrap gap-2">
                               <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${movie.category === 'Banner' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : movie.category === 'Series' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-red-600/10 text-red-600 border border-red-600/20'}`}>
@@ -1394,6 +1608,14 @@ export default function AdminPanel({
                           </td>
                           <td className="p-6 text-right">
                             <div className="flex gap-3 justify-end">
+                              <button 
+                                onClick={() => handleSyncTrend(movie)} 
+                                disabled={analyzingId === movie.id}
+                                className={`p-3 bg-[#1a1a1a] rounded-xl transition-all active:scale-90 border border-[#222] ${movie.isTrending ? 'text-orange-500 border-orange-500/20' : 'text-[#444] hover:text-blue-400'}`}
+                                title="Analyze Trend with AI"
+                              >
+                                <RefreshCcw size={18} className={analyzingId === movie.id ? 'animate-spin' : ''} />
+                              </button>
                               <button onClick={() => prepareEdit(movie)} className="p-3 bg-[#1a1a1a] text-blue-400 hover:bg-blue-400/10 rounded-xl transition-all active:scale-90 border border-[#222]">
                                 <Pencil size={18} />
                               </button>

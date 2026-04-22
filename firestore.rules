@@ -28,11 +28,21 @@ service cloud.firestore {
       allow write: if true;
     }
 
-    // Movie Requests
-    match /movieRequests/{requestId} {
+    // Users collection
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if true; // Admin manages this
+    }
+
+    // Registration Requests
+    match /registrationRequests/{requestId} {
       allow create: if true;
-      allow read: if true; // Allow admin to read (and users if needed)
-      allow update, delete: if true; // Allow admin to manage
+      allow read: if true;
+      allow update, delete: if true;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
