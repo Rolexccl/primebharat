@@ -6,9 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Play, ChevronLeft, ChevronRight, Search, Bell, Plus, Check, X, Send, Settings, Menu, ShieldCheck, Home, Film, Tv2, Heart, MessageSquarePlus, CircleUser, Lock, User as UserIcon, ChevronDown } from 'lucide-react';
-import { doc, setDoc, onSnapshot, collection, writeBatch, query, orderBy, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { doc, setDoc, onSnapshot, collection, writeBatch, query, orderBy, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { Movie, User } from './types';
 import { MOVIES } from './constants';
@@ -872,9 +870,6 @@ export default function App() {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [myListIds, setMyListIds] = useState<string[]>([]);
   const [currentView, setCurrentView] = useState<'home' | 'myList' | 'movies' | 'request' | 'profile'>('home');
-  const [newPassword, setNewPassword] = useState('');
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
@@ -1058,28 +1053,6 @@ export default function App() {
     localStorage.removeItem('bharat_prime_user_id'); // Clear local ID to force fresh identity
   };
 
-  const handleUpdatePassword = async () => {
-    if (!currentUser || !newPassword || newPassword.length < 4) {
-      toast.error("Password must be at least 4 characters");
-      return;
-    }
-    setIsUpdatingPassword(true);
-    try {
-      await updateDoc(doc(db, 'users', currentUser.userId), {
-        password: newPassword
-      });
-      setCurrentUser({ ...currentUser, password: newPassword });
-      setNewPassword('');
-      setIsChangingPassword(false);
-      toast.success("Security Key Updated Successfully");
-    } catch (error) {
-      console.error(error);
-      toast.error("Update failed");
-    } finally {
-      setIsUpdatingPassword(false);
-    }
-  };
-
   const handleForceLogoutAll = async () => {
     if (!window.confirm("CRITICAL: This will log out ALL USERS SYSTEM-WIDE. Proceed?")) return;
     const qSnap = await getDoc(doc(db, 'config', 'admin_pass')); // Using this as a dummy placeholder for batch ops
@@ -1093,7 +1066,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#121212] text-white selection:bg-red-600">
-      <ToastContainer position="top-center" theme="dark" autoClose={3000} hideProgressBar aria-label="Notifications" />
       <AnimatePresence mode="wait">
         {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
       </AnimatePresence>
@@ -1217,42 +1189,13 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-col items-center justify-center border-t md:border-t-0 md:border-l border-white/5 pt-8 md:pt-0 md:pl-10">
-                         <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-6 italic">SECURE PASSWORD CONTROL</p>
-                         {!isChangingPassword ? (
-                           <button 
-                             onClick={() => setIsChangingPassword(true)}
-                             className="bg-red-600/10 hover:bg-red-600 border border-red-600/20 text-red-600 hover:text-white px-8 py-3 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2 group"
-                           >
-                             <Lock size={12} className="group-hover:rotate-12 transition-transform" /> CHANGE SECURITY KEY
-                           </button>
-                         ) : (
-                           <div className="w-full space-y-3">
-                             <div className="relative group">
-                               <input 
-                                 type="text" 
-                                 value={newPassword}
-                                 onChange={(e) => setNewPassword(e.target.value)}
-                                 placeholder="Enter New Password"
-                                 className="w-full bg-black/60 border border-white/10 rounded-xl py-3 px-4 text-xs font-black focus:border-red-600 outline-none transition-all text-white placeholder:text-zinc-800"
-                               />
-                             </div>
-                             <div className="flex gap-2">
-                               <button 
-                                 onClick={handleUpdatePassword}
-                                 disabled={isUpdatingPassword}
-                                 className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all disabled:opacity-50"
-                               >
-                                 {isUpdatingPassword ? 'UPDATING...' : 'CONFIRM UPDATE'}
-                               </button>
-                               <button 
-                                 onClick={() => { setIsChangingPassword(false); setNewPassword(''); }}
-                                 className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-4 rounded-xl transition-all"
-                               >
-                                 <X size={14} />
-                               </button>
-                             </div>
-                           </div>
-                         )}
+                        <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-3 italic">ACCOUNT CREDITS</p>
+                        <span className="text-5xl sm:text-6xl font-black text-white italic tracking-tighter mb-4 drop-shadow-[0_0_30px_rgba(255,255,255,0.1)]">
+                          ₹{currentUser?.balance || '0'}
+                        </span>
+                        <div className="bg-red-600/10 border border-red-600/20 px-4 py-1 rounded-full">
+                           <p className="text-[8px] text-red-600 font-black uppercase tracking-widest">Cinema Ready</p>
+                        </div>
                     </div>
                   </div>
                 </div>
