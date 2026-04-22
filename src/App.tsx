@@ -5,8 +5,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, ChevronLeft, ChevronRight, Search, Bell, Plus, Check, X, Send, Settings, Menu, ShieldCheck, Home, Film, Tv2, Heart, MessageSquarePlus, CircleUser, Lock, User as UserIcon } from 'lucide-react';
-import { doc, setDoc, onSnapshot, collection, writeBatch, query, orderBy, serverTimestamp, getDoc } from 'firebase/firestore';
+import { Play, ChevronLeft, ChevronRight, Search, Bell, Plus, Check, X, Send, Settings, Menu, ShieldCheck, Home, Film, Tv2, Heart, MessageSquarePlus, CircleUser, Lock, Calendar, User as UserIcon } from 'lucide-react';
+import { doc, setDoc, onSnapshot, collection, writeBatch, query, orderBy, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { Movie, User } from './types';
 import { MOVIES } from './constants';
@@ -59,7 +59,7 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
   const [error, setError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
-  const [registerData, setRegisterData] = useState({ name: '', userId: '', password: '' });
+  const [registerData, setRegisterData] = useState({ name: '', userId: '', password: '', planName: 'Weekly (19 RS)' });
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,7 +139,7 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
       });
       
       setError('Request sent! Please wait for admin approval.');
-      setRegisterData({ name: '', userId: '', password: '' });
+      setRegisterData({ name: '', userId: '', password: '', planName: 'Weekly (19 RS)' });
       setTimeout(() => {
         setIsRegistering(false);
         setError('');
@@ -250,6 +250,30 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
               />
             </div>
           </motion.div>
+
+          {isRegistering && (
+            <motion.div variants={itemVariants} className="space-y-1">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[7px] font-black text-zinc-600 uppercase tracking-[0.4em]">Subscription Plan</label>
+                <Calendar className="w-2 h-2 text-red-600/30" />
+              </div>
+              <div className="relative group">
+                <div className="absolute inset-0 bg-red-600/5 rounded-lg blur-md group-focus-within:bg-red-600/10 transition-all opacity-0 group-focus-within:opacity-100" />
+                <select 
+                  value={registerData.planName}
+                  onChange={(e) => setRegisterData({...registerData, planName: e.target.value})}
+                  className="relative w-full bg-black/40 border border-white/5 rounded-lg py-2.5 px-4 text-[10px] font-black focus:border-red-600 focus:bg-[#0a0a0a] outline-none transition-all text-white appearance-none cursor-pointer"
+                >
+                  <option value="Weekly (19 RS)" className="bg-[#0a0a0a] text-white">Weekly (19 RS)</option>
+                  <option value="Monthly (55 RS)" className="bg-[#0a0a0a] text-white">Monthly (55 RS)</option>
+                  <option value="90 Days (149 RS)" className="bg-[#0a0a0a] text-white">90 Days (149 RS)</option>
+                </select>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <ChevronRight size={10} className="text-zinc-600 rotate-90" />
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {error && (
             <motion.div 
@@ -860,6 +884,9 @@ export default function App() {
   const [selectedMovieForQuality, setSelectedMovieForQuality] = useState<Movie | null>(null);
   const [playingMovie, setPlayingMovie] = useState<{ movie: Movie, url: string } | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passwordUpdateSuccess, setPasswordUpdateSuccess] = useState(false);
 
   useEffect(() => {
     if (isAuthorized && currentUser?.userId) {
@@ -1031,6 +1058,23 @@ export default function App() {
     localStorage.removeItem('bharat_prime_user_id'); // Clear local ID to force fresh identity
   };
 
+  const handlePasswordUpdate = async () => {
+    if (!currentUser?.userId || !newPassword) return;
+    setIsUpdatingPassword(true);
+    try {
+      await updateDoc(doc(db, "users", currentUser.userId), {
+        password: newPassword.trim()
+      });
+      setPasswordUpdateSuccess(true);
+      setTimeout(() => setPasswordUpdateSuccess(false), 3000);
+      setNewPassword('');
+    } catch (err) {
+      console.error("Error updating password:", err);
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
+
   const handleForceLogoutAll = async () => {
     if (!window.confirm("CRITICAL: This will log out ALL USERS SYSTEM-WIDE. Proceed?")) return;
     const qSnap = await getDoc(doc(db, 'config', 'admin_pass')); // Using this as a dummy placeholder for batch ops
@@ -1151,29 +1195,45 @@ export default function App() {
                 </div>
 
                 <div className="w-full bg-black/40 border border-white/5 p-6 sm:p-8 rounded-[2rem] mb-6 md:mb-8">
-                   <div className="grid md:grid-cols-2 gap-8 md:gap-10">
+                   <div className="w-full">
                     <div>
-                      <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-6 text-center md:text-left italic">MEMBER ACCOUNT SECRETS</p>
-                      <div className="space-y-3">
-                        <div className="p-3 bg-black/40 rounded-xl border border-white/5 flex flex-col items-center md:items-start">
-                          <p className="text-[7px] font-black text-zinc-800 uppercase mb-1 tracking-widest">LOGIN ID</p>
-                          <p className="text-xs font-mono text-white font-black tracking-widest">{currentUser?.userId}</p>
+                      <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-6 text-center italic">MEMBER ACCOUNT SECRETS</p>
+                      <div className="grid sm:grid-cols-2 gap-4">
+                        <div className="p-4 bg-black/40 rounded-2xl border border-white/5 flex flex-col items-center">
+                          <p className="text-[7px] font-black text-zinc-800 uppercase mb-2 tracking-widest">LOGIN ID</p>
+                          <p className="text-sm font-mono text-white font-black tracking-widest">{currentUser?.userId}</p>
                         </div>
-                        <div className="p-3 bg-black/40 rounded-xl border border-white/5 flex flex-col items-center md:items-start">
-                          <p className="text-[7px] font-black text-zinc-800 uppercase mb-1 tracking-widest">LOGIN PASSWORD</p>
-                          <p className="text-xs font-mono text-yellow-500 font-black tracking-widest">{currentUser?.password || '••••••••'}</p>
+                        <div className="p-4 bg-black/40 rounded-2xl border border-white/5 flex flex-col items-center">
+                          <p className="text-[7px] font-black text-zinc-800 uppercase mb-2 tracking-widest">CURRENT PASSWORD</p>
+                          <p className="text-sm font-mono text-yellow-500 font-black tracking-widest">{currentUser?.password || '••••••••'}</p>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex flex-col items-center justify-center border-t md:border-t-0 md:border-l border-white/5 pt-8 md:pt-0 md:pl-10">
-                        <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-3 italic">ACCOUNT CREDITS</p>
-                        <span className="text-5xl sm:text-6xl font-black text-white italic tracking-tighter mb-4 drop-shadow-[0_0_30px_rgba(255,255,255,0.1)]">
-                          ₹{currentUser?.balance || '0'}
-                        </span>
-                        <div className="bg-red-600/10 border border-red-600/20 px-4 py-1 rounded-full">
-                           <p className="text-[8px] text-red-600 font-black uppercase tracking-widest">Cinema Ready</p>
+                      <div className="mt-6 pt-6 border-t border-white/5">
+                        <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-4 text-center italic">CHANGE ACCESS KEY</p>
+                        <div className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
+                          <div className="relative flex-1">
+                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-600" />
+                            <input 
+                              type="text" 
+                              value={newPassword}
+                              onChange={(e) => setNewPassword(e.target.value)}
+                              placeholder="New Security Key"
+                              className="w-full bg-black/60 border border-white/5 rounded-xl py-3 pl-10 pr-4 text-[11px] font-black focus:border-red-600 outline-none transition-all placeholder:text-zinc-800 text-white"
+                            />
+                          </div>
+                          <button 
+                            onClick={handlePasswordUpdate}
+                            disabled={isUpdatingPassword || !newPassword}
+                            className="bg-red-600 hover:bg-red-700 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-black px-6 py-3 rounded-xl text-[9px] uppercase tracking-widest transition-all shadow-lg active:scale-95"
+                          >
+                            {isUpdatingPassword ? 'Syncing...' : passwordUpdateSuccess ? 'Success' : 'Update Key'}
+                          </button>
                         </div>
+                        {passwordUpdateSuccess && (
+                          <p className="text-[8px] text-green-500 font-black text-center mt-3 uppercase tracking-widest animate-pulse">Security Key Updated Successfully</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

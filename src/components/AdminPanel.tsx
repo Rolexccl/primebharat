@@ -9,7 +9,7 @@ import {
   LayoutGrid, PlusCircle, ShieldCheck, Search, Pencil, Trash2, X, 
   Menu, Play, Trash, Check, Globe, Calendar, FileText,
   Clapperboard, ListVideo, AlertTriangle, BrainCircuit, TrendingDown, TrendingUp, Scan,
-  CircleUser
+  CircleUser, ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast, ToastContainer } from 'react-toastify';
@@ -525,13 +525,19 @@ export default function AdminPanel({
       const userRef = doc(db, "users", req.userId);
       const reqRef = doc(db, "registrationRequests", req.id);
       
+      const planName = req.planName || 'Weekly (19 RS)';
+      let price = '₹19';
+      let days = 7;
+      if (planName === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
+      if (planName === '90 Days (149 RS)') { price = '₹149'; days = 90; }
+
       batch.set(userRef, {
         name: req.name,
         password: req.password,
-        planName: 'BASIC',
-        planPrice: '₹0',
+        planName,
+        planPrice: price,
         startDate: new Date().toISOString().split('T')[0],
-        expiryDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 1 day trial
+        expiryDate: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         createdAt: serverTimestamp(),
         isActive: true
       });
@@ -1105,24 +1111,29 @@ export default function AdminPanel({
                       {/* Plan Logic */}
                       <div className="space-y-1.5">
                         <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Subscription Plan</label>
-                        <select 
-                          value={userFormData.planName}
-                          onChange={e => {
-                            const val = e.target.value;
-                            let price = '₹19';
-                            let days = 7;
-                            if (val === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
-                            if (val === '90 Days (149 RS)') { price = '₹149'; days = 90; }
-                            
-                            const expiry = new Date(new Date(userFormData.startDate).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                            setUserFormData({...userFormData, planName: val, planPrice: price, expiryDate: expiry});
-                          }}
-                          className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold appearance-none"
-                        >
-                          <option value="Weekly (19 RS)">Weekly (19 RS)</option>
-                          <option value="Monthly (55 RS)">Monthly (55 RS)</option>
-                          <option value="90 Days (149 RS)">90 Days (149 RS)</option>
-                        </select>
+                        <div className="relative">
+                          <select 
+                            value={userFormData.planName}
+                            onChange={e => {
+                              const val = e.target.value;
+                              let price = '₹19';
+                              let days = 7;
+                              if (val === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
+                              if (val === '90 Days (149 RS)') { price = '₹149'; days = 90; }
+                              
+                              const expiry = new Date(new Date(userFormData.startDate).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                              setUserFormData({...userFormData, planName: val, planPrice: price, expiryDate: expiry});
+                            }}
+                            className="w-full bg-[#111] border border-[#222] rounded-xl py-3 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-black appearance-none cursor-pointer text-white"
+                          >
+                            <option value="Weekly (19 RS)" className="bg-[#0a0a0a]">Weekly (19 RS)</option>
+                            <option value="Monthly (55 RS)" className="bg-[#0a0a0a]">Monthly (55 RS)</option>
+                            <option value="90 Days (149 RS)" className="bg-[#0a0a0a]">90 Days (149 RS)</option>
+                          </select>
+                          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                            <ChevronRight size={14} className="text-[#444] rotate-90" />
+                          </div>
+                        </div>
                       </div>
 
                       <div className="space-y-1.5">
@@ -1272,6 +1283,12 @@ export default function AdminPanel({
                               <div className="flex flex-col">
                                 <span className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mb-1">Access Key</span>
                                 <code className="text-[#f1c40f] text-xs font-bold uppercase bg-[#f1c40f]/5 px-2 py-1 rounded border border-[#f1c40f]/10">{req.password}</code>
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mb-1">Plan Requested</span>
+                                <span className="text-red-500 text-xs font-bold uppercase bg-red-500/5 px-2 py-1 rounded border border-red-500/10 transition-all group-hover:bg-red-500/10">
+                                  {req.planName || 'Weekly (19 RS)'}
+                                </span>
                               </div>
                             </div>
                             <div className="text-[8px] font-black text-zinc-800 uppercase tracking-widest pt-2">
