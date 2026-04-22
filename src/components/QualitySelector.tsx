@@ -48,47 +48,40 @@ export default function QualitySelector({ movie, onClose, onSelect }: QualitySel
           className="w-full max-w-md bg-[#1a1a1a] rounded-3xl overflow-hidden shadow-2xl border border-white/10"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="relative aspect-[4/3] sm:aspect-video w-full">
+          <div className="relative aspect-video w-full">
             <img src={movie.image || movie.thumbnail || undefined} alt={movie.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#111] via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a1a] to-transparent" />
             <div className="absolute bottom-4 left-6 right-6">
-              <h2 className="text-lg sm:text-xl md:text-2xl font-black text-white leading-tight uppercase italic tracking-tight drop-shadow-2xl">
-                {movie.title} {movie.year ? `(${movie.year})` : ''} {movie.language ? movie.language.toUpperCase() : ''} {movie.quality || ''}
-              </h2>
+              <h2 className="text-2xl font-black text-white tracking-tighter uppercase italic">{movie.title}</h2>
             </div>
           </div>
-          <div className="p-4 sm:p-6 space-y-3">
-            <div className="space-y-2.5">
+          <div className="p-6 pt-2 space-y-4">
+            <div className="space-y-2">
               {qualities.map((q) => (
                 <div key={q.label} className="flex gap-2">
                   <button
                     onClick={() => onSelect(movie, q.url)}
-                    className="flex-1 flex items-center gap-4 bg-[#222] hover:bg-[#2a2a2a] transition-all p-3.5 sm:p-4 rounded-xl sm:rounded-2xl group border border-white/5 active:scale-[0.98]"
+                    className="flex-1 flex items-center gap-4 bg-[#2a2a2a] hover:bg-[#333] transition-all p-4 rounded-2xl group"
                   >
-                    <div className="w-9 h-9 sm:w-10 sm:h-10 bg-red-600 rounded-full flex items-center justify-center shadow-[0_4px_15px_rgba(229,9,20,0.3)] group-hover:scale-105 transition-transform">
-                      <Play className="fill-white text-white ml-0.5" size={16} />
+                    <div className="w-10 h-10 bg-red-600/20 rounded-full flex items-center justify-center group-hover:bg-red-600 transition-colors">
+                      <Play className="fill-white text-white ml-1" size={18} />
                     </div>
                     <div className="text-left">
-                      <span className="block text-sm sm:text-base font-black text-white uppercase italic tracking-tighter">{q.label}</span>
-                      <span className="text-[8px] sm:text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em]">Stream Now</span>
+                      <span className="block text-base font-black text-white uppercase italic tracking-tight">{q.label}</span>
+                      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">Stream Now</span>
                     </div>
                   </button>
                   <button
                     onClick={() => handleDownload(q.url, q.label)}
-                    className="px-4 sm:px-5 bg-[#222] hover:bg-[#2a2a2a] text-zinc-400 hover:text-white rounded-xl sm:rounded-2xl transition-all flex items-center justify-center border border-white/5 active:scale-[0.98]"
+                    className="p-4 bg-[#2a2a2a] hover:bg-white/10 rounded-2xl transition-all text-white flex items-center justify-center border border-white/5"
                     title="Download"
                   >
-                    <Download size={18} className="sm:w-[20px] sm:h-[20px]" />
+                    <Download size={20} />
                   </button>
                 </div>
               ))}
             </div>
-            <button 
-              onClick={onClose} 
-              className="w-full bg-[#222] hover:bg-[#2a2a2a] text-white font-black py-3.5 sm:py-4 rounded-xl sm:rounded-2xl transition-all text-xs sm:text-sm uppercase tracking-[0.3em] border border-white/5 mt-2 active:scale-[0.98]"
-            >
-              Close
-            </button>
+            <button onClick={onClose} className="w-full bg-white/5 hover:bg-white/10 text-white font-black py-4 rounded-2xl transition-all text-sm uppercase tracking-widest border border-white/10">Close</button>
           </div>
         </motion.div>
       </motion.div>

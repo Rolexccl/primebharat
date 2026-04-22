@@ -5,12 +5,11 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Movie, User } from '../types';
-import { checkIsTrending } from '../lib/gemini';
 import { 
   LayoutGrid, PlusCircle, ShieldCheck, Search, Pencil, Trash2, X, 
   Menu, Play, Trash, Check, Globe, Calendar, FileText,
   Clapperboard, ListVideo, AlertTriangle, BrainCircuit, TrendingDown, TrendingUp, Scan,
-  CircleUser, RefreshCcw, Sparkles, ChevronDown
+  CircleUser
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast, ToastContainer } from 'react-toastify';
@@ -67,8 +66,6 @@ export default function AdminPanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUserSubmitting, setIsUserSubmitting] = useState(false);
   const [isOcrLoading, setIsOcrLoading] = useState(false);
-  const [isAnalyzingAll, setIsAnalyzingAll] = useState(false);
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
 
   // Financial Stats State
   const [financeStats, setFinanceStats] = useState({
@@ -528,28 +525,13 @@ export default function AdminPanel({
       const userRef = doc(db, "users", req.userId);
       const reqRef = doc(db, "registrationRequests", req.id);
       
-      const planRaw = req.plan || 'Weekly (19 RS)';
-      let days = 7;
-      let price = '₹19';
-      let planName = 'Weekly (19 RS)';
-
-      if (planRaw.includes('Monthly')) {
-        days = 30;
-        price = '₹55';
-        planName = 'Monthly (55 RS)';
-      } else if (planRaw.includes('90')) {
-        days = 90;
-        price = '₹149';
-        planName = '90 Days (149 RS)';
-      }
-
       batch.set(userRef, {
         name: req.name,
         password: req.password,
-        planName: planName,
-        planPrice: price,
+        planName: 'BASIC',
+        planPrice: '₹0',
         startDate: new Date().toISOString().split('T')[0],
-        expiryDate: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        expiryDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 1 day trial
         createdAt: serverTimestamp(),
         isActive: true
       });
@@ -570,51 +552,6 @@ export default function AdminPanel({
     } catch (err) {
       console.error(err);
       toast.error("Rejection failed");
-    }
-  };
-
-  const handleSyncTrend = async (movie: Movie) => {
-    setAnalyzingId(movie.id);
-    try {
-      const result = await checkIsTrending(movie.title, movie.year || '2024');
-      await updateDoc(doc(db, 'movies', movie.id), {
-        isTrending: result.isTrending,
-        trendAnalyzedAt: serverTimestamp()
-      });
-      if (result.isTrending) {
-        toast.success(`${movie.title} is now Trending!`);
-      } else {
-        toast.info(`${movie.title} status updated.`);
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error("Trend analysis failed");
-    } finally {
-      setAnalyzingId(null);
-    }
-  };
-
-  const handleSyncAllTrends = async () => {
-    if (movies.length === 0) return;
-    setIsAnalyzingAll(true);
-    let trendingCount = 0;
-    try {
-      toast.info("Analyzing global trends...");
-      for (const movie of movies) {
-        // Skip recently analyzed ones if you want, but for now we sync all
-        const result = await checkIsTrending(movie.title, movie.year || '2024');
-        await updateDoc(doc(db, 'movies', movie.id), {
-          isTrending: result.isTrending,
-          trendAnalyzedAt: serverTimestamp()
-        });
-        if (result.isTrending) trendingCount++;
-      }
-      toast.success(`Analysis complete! ${trendingCount} movies are trending.`);
-    } catch (error) {
-      console.error(error);
-      toast.error("Bulk sync failed");
-    } finally {
-      setIsAnalyzingAll(false);
     }
   };
 
@@ -1165,29 +1102,27 @@ export default function AdminPanel({
                         />
                       </div>
 
+                      {/* Plan Logic */}
                       <div className="space-y-1.5">
                         <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Subscription Plan</label>
-                        <div className="relative group">
-                          <select 
-                            value={userFormData.planName}
-                            onChange={e => {
-                              const val = e.target.value;
-                              let price = '₹19';
-                              let days = 7;
-                              if (val === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
-                              if (val === '90 Days (149 RS)') { price = '₹149'; days = 90; }
-                              
-                              const expiry = new Date(new Date(userFormData.startDate).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                              setUserFormData({...userFormData, planName: val, planPrice: price, expiryDate: expiry});
-                            }}
-                            className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold appearance-none cursor-pointer"
-                          >
-                            <option value="Weekly (19 RS)">Weekly (19 RS)</option>
-                            <option value="Monthly (55 RS)">Monthly (55 RS)</option>
-                            <option value="90 Days (149 RS)">90 Days (149 RS)</option>
-                          </select>
-                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-[#555] pointer-events-none group-hover:text-blue-500 transition-colors" />
-                        </div>
+                        <select 
+                          value={userFormData.planName}
+                          onChange={e => {
+                            const val = e.target.value;
+                            let price = '₹19';
+                            let days = 7;
+                            if (val === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
+                            if (val === '90 Days (149 RS)') { price = '₹149'; days = 90; }
+                            
+                            const expiry = new Date(new Date(userFormData.startDate).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                            setUserFormData({...userFormData, planName: val, planPrice: price, expiryDate: expiry});
+                          }}
+                          className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold appearance-none"
+                        >
+                          <option value="Weekly (19 RS)">Weekly (19 RS)</option>
+                          <option value="Monthly (55 RS)">Monthly (55 RS)</option>
+                          <option value="90 Days (149 RS)">90 Days (149 RS)</option>
+                        </select>
                       </div>
 
                       <div className="space-y-1.5">
@@ -1337,12 +1272,6 @@ export default function AdminPanel({
                               <div className="flex flex-col">
                                 <span className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mb-1">Access Key</span>
                                 <code className="text-[#f1c40f] text-xs font-bold uppercase bg-[#f1c40f]/5 px-2 py-1 rounded border border-[#f1c40f]/10">{req.password}</code>
-                              </div>
-                              <div className="flex flex-col">
-                                <span className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mb-1">Proposed Plan</span>
-                                <span className="text-[10px] font-black text-white bg-red-600/20 border border-red-600/30 px-3 py-1 rounded-lg uppercase tracking-tighter italic">
-                                  {req.plan || 'Weekly (19 RS)'}
-                                </span>
                               </div>
                             </div>
                             <div className="text-[8px] font-black text-zinc-800 uppercase tracking-widest pt-2">
@@ -1530,19 +1459,9 @@ export default function AdminPanel({
           {/* Live Logs Section - Always visible at bottom */}
           <section className="mt-20">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-              <div className="flex items-center gap-4">
-                <h5 className="text-xl font-black italic flex items-center gap-3">
-                  <ListVideo className="text-[#e50914]" /> LIVE LOGS
-                </h5>
-                <button 
-                  onClick={handleSyncAllTrends}
-                  disabled={isAnalyzingAll}
-                  className="bg-blue-600/10 border border-blue-600/30 text-blue-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-blue-600 hover:text-white transition-all disabled:opacity-50"
-                >
-                  <RefreshCcw size={14} className={isAnalyzingAll ? 'animate-spin' : ''} />
-                  {isAnalyzingAll ? 'ANALYZING...' : 'SYNC GLOBAL TRENDS'}
-                </button>
-              </div>
+              <h5 className="text-xl font-black italic flex items-center gap-3">
+                <ListVideo className="text-[#e50914]" /> LIVE LOGS
+              </h5>
               
               <div className="flex bg-[#111] p-1 rounded-xl border border-[#222] overflow-x-auto no-scrollbar">
                 {['All', 'Movie', 'Series', 'Banner'].map((filter) => (
@@ -1583,11 +1502,6 @@ export default function AdminPanel({
                                 {movie.title} <span className="text-[#555] text-xs font-bold">({movie.quality || 'N/A'})</span>
                               </div>
                               {movie.year && <span className="text-[#555] text-xs font-bold">({movie.year})</span>}
-                              {movie.isTrending && (
-                                <span className="bg-gradient-to-r from-orange-500 to-red-600 text-white text-[7px] font-black px-2 py-0.5 rounded italic uppercase tracking-tighter shadow-lg shadow-red-600/20 flex items-center gap-1">
-                                  <Sparkles size={8} /> TRENDING
-                                </span>
-                              )}
                             </div>
                             <div className="flex flex-wrap gap-2">
                               <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${movie.category === 'Banner' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : movie.category === 'Series' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-red-600/10 text-red-600 border border-red-600/20'}`}>
@@ -1608,14 +1522,6 @@ export default function AdminPanel({
                           </td>
                           <td className="p-6 text-right">
                             <div className="flex gap-3 justify-end">
-                              <button 
-                                onClick={() => handleSyncTrend(movie)} 
-                                disabled={analyzingId === movie.id}
-                                className={`p-3 bg-[#1a1a1a] rounded-xl transition-all active:scale-90 border border-[#222] ${movie.isTrending ? 'text-orange-500 border-orange-500/20' : 'text-[#444] hover:text-blue-400'}`}
-                                title="Analyze Trend with AI"
-                              >
-                                <RefreshCcw size={18} className={analyzingId === movie.id ? 'animate-spin' : ''} />
-                              </button>
                               <button onClick={() => prepareEdit(movie)} className="p-3 bg-[#1a1a1a] text-blue-400 hover:bg-blue-400/10 rounded-xl transition-all active:scale-90 border border-[#222]">
                                 <Pencil size={18} />
                               </button>
