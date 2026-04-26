@@ -5,8 +5,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, ChevronLeft, ChevronRight, Search, Bell, Plus, Check, X, Send, Settings, Menu, ShieldCheck, Home, Film, Tv2, Heart, MessageSquarePlus, CircleUser, Lock, Calendar, User as UserIcon } from 'lucide-react';
-import { doc, setDoc, onSnapshot, collection, writeBatch, query, orderBy, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
+import { Play, ChevronLeft, ChevronRight, Search, Bell, Plus, Check, X, Send, Settings, Menu, ShieldCheck, Home, Film, Tv2, Heart, MessageSquarePlus, CircleUser, Lock, Calendar, AlertTriangle, User as UserIcon, Clock } from 'lucide-react';
+import { doc, setDoc, onSnapshot, collection, writeBatch, query, orderBy, serverTimestamp, getDoc, updateDoc, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
 import { Movie, User } from './types';
 import { MOVIES } from './constants';
@@ -53,7 +53,7 @@ const getDisplayPlanName = (user: any) => {
 
 // --- Components ---
 
-const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) => {
+const LoginGate = ({ onAuthorized, systemSettings }: { onAuthorized: (userData: any) => void, systemSettings: any }) => {
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -274,6 +274,8 @@ const LoginGate = ({ onAuthorized }: { onAuthorized: (userData: any) => void }) 
               </div>
             </motion.div>
           )}
+
+
 
           {error && (
             <motion.div 
@@ -604,20 +606,41 @@ const Navbar = ({
 
 const HeroBanner = ({ movies, onPlay }: any) => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const bannerMovies = movies.filter((m: any) => m.category === 'Banner').length > 0
-    ? movies.filter((m: any) => m.category === 'Banner')
-    : movies.slice(0, 5);
+  const bannerMovies = movies
+    .filter((m: any) => m.category === 'Banner')
+    .sort((a: any, b: any) => {
+      const timeA = a.createdAt?.seconds || 0;
+      const timeB = b.createdAt?.seconds || 0;
+      return timeB - timeA;
+    })
+    .slice(0, 10);
+
+  if (bannerMovies.length === 0) {
+    const fallbackMovies = [...movies]
+      .sort((a: any, b: any) => {
+        const timeA = a.createdAt?.seconds || 0;
+        const timeB = b.createdAt?.seconds || 0;
+        return timeB - timeA;
+      })
+      .slice(0, 10);
+    return fallbackMovies.length > 0 ? <HeroBannerContent movies={fallbackMovies} onPlay={onPlay} /> : <div className="h-[60vh] sm:h-[70vh] bg-black" />;
+  }
+
+  return <HeroBannerContent movies={bannerMovies} onPlay={onPlay} />;
+};
+
+const HeroBannerContent = ({ movies, onPlay }: any) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
-    if (bannerMovies.length === 0) return;
+    if (movies.length === 0) return;
     const timer = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % bannerMovies.length);
+      setCurrentIndex((prev) => (prev + 1) % movies.length);
     }, 5000);
     return () => clearInterval(timer);
-  }, [bannerMovies.length]);
+  }, [movies.length]);
 
-  if (bannerMovies.length === 0) return <div className="h-[60vh] sm:h-[70vh] bg-black" />;
-  const currentMovie = bannerMovies[currentIndex];
+  const currentMovie = movies[currentIndex];
 
   return (
     <div className="md:px-12 pt-16 md:pt-24">
@@ -675,7 +698,7 @@ const HeroBanner = ({ movies, onPlay }: any) => {
 
         {/* Slider Dots */}
         <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-2 z-20">
-          {bannerMovies.map((_: any, idx: number) => (
+          {movies.map((_: any, idx: number) => (
             <button
               key={idx}
               onClick={() => setCurrentIndex(idx)}
@@ -882,22 +905,27 @@ const Footer = () => (
 export default function App() {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [myListIds, setMyListIds] = useState<string[]>([]);
-  const [currentView, setCurrentView] = useState<'home' | 'myList' | 'movies' | 'request' | 'profile'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'myList' | 'movies' | 'series' | 'request' | 'profile' | 'requestUpgrade'>('home');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPlan, setSelectedPlan] = useState('Weekly (19 RS)');
+  const [paymentMethod, setPaymentMethod] = useState<'telegram' | 'qr' | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userIp, setUserIp] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [systemSettings, setSystemSettings] = useState({ upiId: '', merchantName: 'Bharat Prime' });
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [selectedMovieForQuality, setSelectedMovieForQuality] = useState<Movie | null>(null);
   const [playingMovie, setPlayingMovie] = useState<{ movie: Movie, url: string } | null>(null);
+  const [showExpiryModal, setShowExpiryModal] = useState(false);
+  const [isRequestingPlan, setIsRequestingPlan] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
   const [passwordUpdateSuccess, setPasswordUpdateSuccess] = useState(false);
+  const [userPendingRequest, setUserPendingRequest] = useState<any | null>(null);
 
   useEffect(() => {
     if (isAuthorized && currentUser?.userId) {
@@ -1015,8 +1043,63 @@ export default function App() {
     init();
   }, []);
 
+  useEffect(() => {
+    if (isAuthorized && currentUser?.userId) {
+      const q = query(
+        collection(db, "upgradeRequests"), 
+        orderBy("timestamp", "desc")
+      );
+      const unsubscribeRequests = onSnapshot(q, (snap) => {
+        const pending = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as any))
+          .find(r => r.userId === currentUser.userId && r.status === 'pending');
+        setUserPendingRequest(pending || null);
+      });
+      return () => unsubscribeRequests();
+    }
+  }, [isAuthorized, currentUser?.userId]);
+
   const handlePlay = async (movie: Movie) => {
+    // Check if plan is expired
+    if (currentUser?.expiryDate) {
+      const expiry = new Date(currentUser.expiryDate);
+      if (expiry < new Date()) {
+        setShowExpiryModal(true);
+        return;
+      }
+    } else if (!currentUser?.userId && isAuthorized) {
+      // Basic guest check if applicable, but here users should have IDs
+    }
+
     setSelectedMovieForQuality(movie);
+  };
+
+  const handlePlanRequest = async (type: 'upgrade' | 'extension', data: any) => {
+    if (!currentUser?.userId) return;
+    if (systemSettings.upiId && !data.transactionId) {
+      alert("Please enter a valid Transaction ID correctly verify by admin");
+      return;
+    }
+    setIsRequestingPlan(true);
+
+    try {
+      const requestId = `${currentUser.userId}_${Date.now()}`;
+      await setDoc(doc(db, "upgradeRequests", requestId), {
+        userId: currentUser.userId,
+        userName: currentUser.name || currentUser.userId,
+        type,
+        ...data,
+        status: 'pending',
+        timestamp: serverTimestamp()
+      });
+      alert(`PAYMENT RECEIVED: Your transaction is now UNDER REVIEW. Please allow a few minutes to hours for verification. Your plan will be updated automatically upon approval.`);
+      setCurrentView('profile');
+    } catch (err) {
+      console.error("Error sending plan request:", err);
+      alert("Failed to send request. Please try again.");
+    } finally {
+      setIsRequestingPlan(false);
+    }
   };
 
   const handleQualitySelect = (movie: Movie, url: string) => {
@@ -1086,11 +1169,29 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "system", "config"), (docSnap) => {
+      if (docSnap.exists()) {
+        setSystemSettings(docSnap.data() as any);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   const handleForceLogoutAll = async () => {
     if (!window.confirm("CRITICAL: This will log out ALL USERS SYSTEM-WIDE. Proceed?")) return;
-    const qSnap = await getDoc(doc(db, 'config', 'admin_pass')); // Using this as a dummy placeholder for batch ops
-    // Real implementation would be in AdminPanel or a Cloud Function
-    alert("System-wide reset initialized. All sessions will be cleared shortly.");
+    try {
+      const qSnap = await getDocs(collection(db, 'authorized_ips'));
+      const batch = writeBatch(db);
+      qSnap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      alert("System-wide reset completed. All sessions have been terminated.");
+      setIsAuthorized(false);
+      setCurrentUser(null);
+    } catch (err) {
+      console.error("Force logout failed:", err);
+      alert("Flush failed. Check permissions.");
+    }
   };
 
   if (isLoading && showSplash) return <SplashScreen onComplete={() => {}} />;
@@ -1104,7 +1205,7 @@ export default function App() {
       </AnimatePresence>
 
       {!showSplash && !isAuthorized && !isAuthChecking && (
-        <LoginGate onAuthorized={handleAuthorized} />
+        <LoginGate onAuthorized={handleAuthorized} systemSettings={systemSettings} />
       )}
 
       <motion.div
@@ -1118,13 +1219,13 @@ export default function App() {
           onMoviesClick={() => { setCurrentView('movies'); setSelectedCategory(null); }}
           onMyListClick={() => { setCurrentView('myList'); setSelectedCategory(null); }}
           onRequestClick={() => { setCurrentView('request'); setSelectedCategory(null); }}
-          onWebSeriesClick={() => setIsModalOpen(true)}
+          onWebSeriesClick={() => { setCurrentView('series'); setSelectedCategory(null); }}
           onAdminClick={() => setIsAdminOpen(true)}
           onProfileClick={() => { setCurrentView('profile'); setSelectedCategory(null); }}
           currentUser={currentUser}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
-          hideMain={!!selectedCategory || currentView === 'myList' || currentView === 'movies' || currentView === 'request' || currentView === 'profile'}
+          hideMain={!!selectedCategory || currentView === 'myList' || currentView === 'movies' || currentView === 'series' || currentView === 'request' || currentView === 'profile' || currentView === 'requestUpgrade'}
           myListCount={myListIds.length}
         />
 
@@ -1164,6 +1265,14 @@ export default function App() {
                     <h2 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tighter uppercase italic mb-1 bg-gradient-to-r from-white via-white to-zinc-500 bg-clip-text text-transparent">
                       {currentUser?.userId || 'USER'}
                     </h2>
+                    {userPendingRequest && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <div className="w-1.5 h-1.5 bg-yellow-500 rounded-full animate-pulse" />
+                        <p className="text-[7.5px] font-black text-yellow-500 uppercase tracking-[0.3em] flex items-center gap-1.5 bg-yellow-500/5 px-3 py-1 rounded-full border border-yellow-500/10 shadow-lg">
+                          Maintenance Mode: Upgrade Under Review
+                        </p>
+                      </div>
+                    )}
                     <p className="text-zinc-600 font-black uppercase tracking-[0.3em] text-[8px] sm:text-[9px] px-4 md:px-0">
                       {currentUser?.name || 'IDENTITY UNVERIFIED'} <span className="mx-1 opacity-20">|</span> ID: {currentUser?.userId?.toUpperCase()}
                     </p>
@@ -1189,9 +1298,16 @@ export default function App() {
                         </p>
                       </div>
                     </div>
-                    <span className="text-[8px] font-black text-green-500 uppercase tracking-[0.4em] mt-6 flex items-center gap-2">
+                    <span className="text-[8px] font-black text-green-500 uppercase tracking-[0.4em] mt-6 flex items-center gap-2 mb-6">
                        <ShieldCheck size={10} className="text-green-500" /> STATUS: ACTIVE
                     </span>
+                    <button 
+                      onClick={() => setCurrentView('requestUpgrade')}
+                      disabled={isRequestingPlan || !!userPendingRequest}
+                      className="w-full bg-green-600 hover:bg-green-700 text-white font-black py-4 rounded-2xl text-[9px] uppercase tracking-widest transition-all shadow-[0_10px_30px_rgba(22,163,74,0.3)] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"
+                    >
+                      <Plus size={14} /> {userPendingRequest ? 'Upgrade Under Review' : 'Upgrade Membership'}
+                    </button>
                   </div>
 
                   <div className="bg-black/40 p-6 rounded-2xl border border-white/5 hover:border-red-600/30 transition-all group flex flex-col items-center">
@@ -1303,7 +1419,13 @@ export default function App() {
             </div>
             
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-5">
-              {(selectedCategory === 'Trending' ? movies.slice(0, 30) : filterByLang(selectedCategory)).filter(m => m.title?.toLowerCase().includes(searchQuery.toLowerCase())).map(m => (
+              {(selectedCategory === 'Trending' 
+                ? movies.slice(0, 30) 
+                : movies.filter(m => 
+                    m.language === selectedCategory && 
+                    (currentView === 'series' ? m.category === 'Series' : m.category === 'Movie')
+                  )
+              ).filter(m => m.title?.toLowerCase().includes(searchQuery.toLowerCase())).map(m => (
                 <MovieCard 
                   key={m.id}
                   movie={m}
@@ -1312,6 +1434,142 @@ export default function App() {
                   isInMyList={myListIds.includes(m.id)}
                 />
               ))}
+            </div>
+          </div>
+        ) : currentView === 'series' ? (
+          <div className="pb-20 pt-8 md:pt-12 px-4 md:px-12">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => { setCurrentView('home'); setSearchQuery(''); }}
+                  className="p-3 bg-white/5 hover:bg-red-600 rounded-full text-white transition-all border border-white/10 hover:border-red-600"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+                <h2 className="text-2xl sm:text-4xl font-black text-red-600 uppercase tracking-tighter italic">WEB SERIES</h2>
+              </div>
+
+              <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
+                <div className="flex items-center bg-white/5 rounded-full px-6 py-3 w-full md:w-80 border border-white/10 focus-within:border-red-600 transition-all backdrop-blur-sm">
+                  <Search className="w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search series..."
+                    className="bg-transparent border-none outline-none ml-3 w-full text-white text-sm font-medium"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+            
+            {searchQuery ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-5">
+                {movies.filter(m => m.category === 'Series' && m.title?.toLowerCase().includes(searchQuery.toLowerCase())).map(m => (
+                  <MovieCard 
+                    key={m.id}
+                    movie={m}
+                    onPlay={handlePlay}
+                    onToggleMyList={toggleMyList}
+                    isInMyList={myListIds.includes(m.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              ['Kannada', 'Hindi', 'Telugu', 'Tamil'].map((lang) => {
+                const langSeries = movies.filter(m => m.category === 'Series' && m.language === lang);
+                if (langSeries.length === 0) return null;
+                return (
+                  <MovieRow 
+                    key={lang}
+                    title={`${lang} Series`} 
+                    movies={langSeries} 
+                    myList={movies.filter(m => myListIds.includes(m.id))}
+                    onPlay={handlePlay}
+                    onInfo={handlePlay}
+                    onToggleMyList={toggleMyList}
+                    onViewMore={() => handleViewMore(lang)}
+                  />
+                );
+              })
+            )}
+          </div>
+        ) : currentView === 'requestUpgrade' ? (
+          <div className="pb-20 pt-16 px-4 max-w-2xl mx-auto text-center">
+             <button 
+              onClick={() => setCurrentView('profile')}
+              className="p-3 bg-white/5 hover:bg-red-600 rounded-full text-white transition-all border border-white/10 mb-8 self-start"
+            >
+              <ChevronLeft size={24} />
+            </button>
+            <div className="bg-zinc-900 p-8 rounded-3xl border border-white/10 shadow-2xl relative overflow-hidden">
+              {userPendingRequest ? (
+                <div className="py-12 px-6">
+                  <div className="w-20 h-20 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-8 border border-yellow-500/20">
+                    <Clock size={40} className="text-yellow-500 animate-pulse" />
+                  </div>
+                  <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Transaction Under Review</h2>
+                  <div className="bg-white/5 p-6 rounded-2xl border border-white/5 mb-8">
+                    <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest leading-relaxed">
+                      Your request for <span className="text-white italic">{userPendingRequest.planName}</span> is being verified by our finance team.
+                    </p>
+                    <div className="mt-4 pt-4 border-t border-white/5 flex flex-col gap-2">
+                       <p className="text-[8px] text-zinc-500 uppercase font-bold tracking-widest">UTR: {userPendingRequest.transactionId}</p>
+                       <p className="text-[8px] text-zinc-600 uppercase font-bold tracking-widest">Submitted: {userPendingRequest.timestamp?.toDate().toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-[0.2em] italic mb-8 max-w-xs mx-auto">
+                    * Verification usually takes 15-60 minutes. Your plan will activate automatically.
+                  </p>
+                  <button 
+                    onClick={() => setCurrentView('home')}
+                    className="w-full bg-zinc-800 hover:bg-zinc-700 py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all text-zinc-400"
+                  >
+                    Return Home
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <ShieldCheck className="mx-auto text-green-500 mb-4" size={48} />
+                  <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-2">Upgrade Membership</h2>
+                  <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mb-8">Select your target plan</p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10 opacity-50 pointer-events-none grayscale">
+                    {['Weekly (19 RS)', 'Monthly (55 RS)', '90 Days (149 RS)'].map(plan => (
+                      <button
+                        key={plan}
+                        className={`p-6 rounded-2xl border-2 transition-all text-left ${selectedPlan === plan ? 'border-green-600 bg-green-600/10' : 'border-white/5 bg-black/20 hover:border-white/20'}`}
+                      >
+                        <h3 className="font-black text-white italic uppercase tracking-tighter text-lg">{plan}</h3>
+                        <p className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest mt-1">
+                          {plan.includes('Weekly') ? 'Full Access • 1 Seat' : plan.includes('Monthly') ? 'Ultra HD • 2 Seats' : 'Family HD • 4 Seats'}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="bg-red-600/5 border border-red-600/20 rounded-2xl p-8 mb-10 text-center">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="p-4 bg-red-600/20 rounded-full animate-pulse">
+                        <AlertTriangle size={32} className="text-red-500" />
+                      </div>
+                      <div>
+                        <h3 className="font-black text-white text-xs uppercase tracking-[0.3em] mb-2 text-red-500">System Maintenance</h3>
+                        <p className="text-[9px] text-zinc-400 font-bold uppercase tracking-widest leading-relaxed max-w-[280px] mx-auto">
+                          Our automated upgrade matrix is currently undergoing synchronization. Online upgrades are temporarily unavailable.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => window.open(`https://t.me/primebharath1`, '_blank')}
+                    className="w-full bg-white/5 hover:bg-white/10 border border-white/10 py-4 h-14 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3 text-white"
+                  >
+                    <Send size={18} className="text-[#229ED9]" /> Contact Admin for Activation
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : currentView === 'movies' ? (
@@ -1343,7 +1601,7 @@ export default function App() {
             
             {searchQuery ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-5">
-                {movies.filter(m => m.title?.toLowerCase().includes(searchQuery.toLowerCase())).map(m => (
+                {movies.filter(m => m.category === 'Movie' && m.title?.toLowerCase().includes(searchQuery.toLowerCase())).map(m => (
                   <MovieCard 
                     key={m.id}
                     movie={m}
@@ -1354,18 +1612,22 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              ['Kannada', 'Hindi', 'Telugu', 'Tamil'].map((lang) => (
-                <MovieRow 
-                  key={lang}
-                  title={lang} 
-                  movies={filterByLang(lang)} 
-                  myList={movies.filter(m => myListIds.includes(m.id))}
-                  onPlay={handlePlay}
-                  onInfo={handlePlay}
-                  onToggleMyList={toggleMyList}
-                  onViewMore={handleViewMore}
-                />
-              ))
+              ['Kannada', 'Hindi', 'Telugu', 'Tamil'].map((lang) => {
+                const langMovies = movies.filter(m => m.category === 'Movie' && m.language === lang);
+                if (langMovies.length === 0) return null;
+                return (
+                  <MovieRow 
+                    key={lang}
+                    title={lang} 
+                    movies={langMovies} 
+                    myList={movies.filter(m => myListIds.includes(m.id))}
+                    onPlay={handlePlay}
+                    onInfo={handlePlay}
+                    onToggleMyList={toggleMyList}
+                    onViewMore={handleViewMore}
+                  />
+                );
+              })
             )}
           </div>
         ) : currentView === 'myList' ? (
@@ -1439,39 +1701,30 @@ export default function App() {
               <>
                 <HeroBanner movies={movies} onPlay={handlePlay} />
                 <div className="pb-20 mt-4 sm:mt-8">
-                  {/* Trending Section */}
-                  {movies.length > 0 && (
-                    <MovieRow 
-                      title="Trending Now" 
-                      movies={movies.slice(0, 10)} 
-                      myList={movies.filter(m => myListIds.includes(m.id))}
-                      onPlay={handlePlay}
-                      onInfo={handlePlay}
-                      onToggleMyList={toggleMyList}
-                      onViewMore={() => handleViewMore('Trending')}
-                      isTrending
-                    />
-                  )}
-                  {['Kannada', 'Hindi', 'Telugu', 'Tamil'].map((lang) => (
+                  {['Kannada', 'Hindi', 'Telugu', 'Tamil'].map((lang) => {
+                  const langMovies = movies.filter(m => m.category === 'Movie' && m.language === lang);
+                  if (langMovies.length === 0) return null;
+                  return (
                     <MovieRow 
                       key={lang}
                       title={lang} 
-                      movies={filterByLang(lang)} 
+                      movies={langMovies} 
                       myList={movies.filter(m => myListIds.includes(m.id))}
                       onPlay={handlePlay}
                       onInfo={handlePlay}
                       onToggleMyList={toggleMyList}
                       onViewMore={handleViewMore}
                     />
-                  ))}
-                </div>
-              </>
+                  );
+                })}
+              </div>
+            </>
             )}
           </>
         )}
       </main>
 
-      {currentView !== 'profile' && <Footer />}
+      {currentView !== 'profile' && currentView !== 'requestUpgrade' && <Footer />}
 
       <AnimatePresence>
         {isAdminOpen && (
@@ -1484,29 +1737,40 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {isModalOpen && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-zinc-950 p-8 rounded-2xl border border-white/10 text-center max-w-sm shadow-2xl">
-              <Bell className="mx-auto text-red-600 mb-3 animate-bounce" size={40} />
-              <h2 className="text-xl font-black mb-1 text-white italic uppercase tracking-tighter">Web Series Soon</h2>
-              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mb-6">Curating the best content</p>
-              <button 
-                onClick={() => setIsModalOpen(false)} 
-                className="w-full bg-red-600 py-3 rounded-lg font-black text-xs uppercase tracking-widest hover:bg-red-700 transition-colors"
-              >
-                Close
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       <QualitySelector 
         movie={selectedMovieForQuality}
         onClose={() => setSelectedMovieForQuality(null)}
         onSelect={handleQualitySelect}
       />
+
+      <AnimatePresence>
+        {showExpiryModal && (
+          <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-zinc-950 p-10 rounded-3xl border border-white/10 text-center max-w-sm shadow-[0_0_50px_rgba(229,9,20,0.2)]">
+              <div className="w-20 h-20 bg-red-600/10 rounded-[2rem] flex items-center justify-center mx-auto mb-6 border border-red-600/20">
+                <AlertTriangle className="text-red-600" size={40} />
+              </div>
+              <h2 className="text-2xl font-black mb-2 text-white italic uppercase tracking-tighter">Plan Expired</h2>
+              <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest mb-8 leading-relaxed">You need to buy the member plan after you can watch it.</p>
+              <div className="space-y-3">
+                <button 
+                  onClick={() => { setShowExpiryModal(false); setCurrentView('profile'); }} 
+                  className="w-full bg-red-600 py-4 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-red-700 transition-all shadow-lg shadow-red-600/20"
+                >
+                  Go to Profile
+                </button>
+                <button 
+                  onClick={() => setShowExpiryModal(false)} 
+                  className="w-full bg-zinc-800 py-4 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-zinc-700 transition-all text-zinc-400"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {playingMovie && (

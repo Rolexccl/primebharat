@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "daisyui";
 @import "plyr/dist/plyr.css";
 
 @theme {
@@ -7,6 +8,18 @@
   @keyframes marquee {
     0% { transform: translateX(0); }
     100% { transform: translateX(-50%); }
+  }
+}
+
+@layer base {
+  body {
+    @apply selection:bg-red-600/30;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-zinc-900/40 backdrop-blur-xl border border-white/5 rounded-3xl shadow-2xl;
   }
 }
 

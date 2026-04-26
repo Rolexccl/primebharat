@@ -58,16 +58,49 @@
         }
       },
       "required": ["title", "category", "timestamp"]
+    },
+    "planRequest": {
+      "title": "Plan Change Request",
+      "description": "A request to upgrade or extend a subscription",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "type": { "type": "string", "enum": ["upgrade", "extension"] },
+        "days": { "type": "number", "description": "Number of days requested for extension" },
+        "planName": { "type": "string", "description": "Target plan for upgrade" },
+        "transactionId": { "type": "string", "description": "Payment UTR/Transaction ID" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "status", "timestamp"]
+    },
+    "setting": {
+      "title": "System Setting",
+      "description": "Global application configuration",
+      "type": "object",
+      "properties": {
+        "upiId": { "type": "string", "description": "Payment UPI ID (e.g. user@bank)" },
+        "merchantName": { "type": "string", "description": "Owner name for payment" }
+      }
     }
   },
   "firestore": {
-    "/movieRequests/{requestId}": {
+    "/requests/{requestId}": {
       "schema": "movieRequest",
       "description": "Collection of movie requests"
+    },
+    "/upgradeRequests/{requestId}": {
+      "schema": "planRequest",
+      "description": "Collection of plan change requests"
     },
     "/users/{userId}": {
       "schema": "user",
       "description": "Collection of user identities and subscription plans"
+    },
+    "/settings/{settingId}": {
+      "schema": "setting",
+      "description": "App settings like UPI IDs"
     }
   }
 }

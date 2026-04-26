@@ -17,7 +17,6 @@ export default function MovieRequest({ onClose, userIp }: MovieRequestProps) {
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [showComingSoon, setShowComingSoon] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +24,7 @@ export default function MovieRequest({ onClose, userIp }: MovieRequestProps) {
 
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'movieRequests'), {
+      await addDoc(collection(db, 'requests'), {
         title: name,
         year,
         category: type === 'Series' ? 'Web Series' : 'Movie',
@@ -36,14 +35,10 @@ export default function MovieRequest({ onClose, userIp }: MovieRequestProps) {
         userName: userIp || 'anonymous'
       });
 
-      if (type === 'Series') {
-        setShowComingSoon(true);
-      } else {
-        setIsSuccess(true);
-        setTimeout(() => {
-          onClose();
-        }, 2000);
-      }
+      setIsSuccess(true);
+      setTimeout(() => {
+        onClose();
+      }, 2000);
     } catch (error) {
       console.error('Error submitting request:', error);
       alert('Failed to submit request. Please try again.');
@@ -52,36 +47,9 @@ export default function MovieRequest({ onClose, userIp }: MovieRequestProps) {
     }
   };
 
-  if (showComingSoon) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-6">
-        <motion.div 
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="bg-zinc-900 border border-white/10 p-12 rounded-[2.5rem] text-center max-w-md w-full shadow-2xl"
-        >
-          <div className="w-20 h-20 bg-cyan-500/10 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-cyan-500/20">
-            <Send className="text-cyan-500" size={40} />
-          </div>
-          <h2 className="text-3xl font-black text-white mb-4 uppercase italic tracking-tighter">Web Series Coming Soon</h2>
-          <p className="text-zinc-400 font-medium mb-8">We are currently curating the best series for you. Stay tuned!</p>
-          <button 
-            onClick={() => {
-              setShowComingSoon(false);
-              setType('Movie');
-            }}
-            className="w-full bg-white text-black font-black py-4 rounded-2xl uppercase tracking-widest text-xs hover:bg-zinc-200 transition-all"
-          >
-            Go Back
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
   if (isSuccess) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-6">
+      <div className="min-h-screen bg-black flex items-center justify-center p-6 text-white font-sans">
         <motion.div 
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -98,7 +66,7 @@ export default function MovieRequest({ onClose, userIp }: MovieRequestProps) {
   }
 
   return (
-    <div className="min-h-screen bg-black pt-20 sm:pt-24 pb-20 px-4 md:px-12">
+    <div className="min-h-screen bg-black pt-20 sm:pt-24 pb-20 px-4 md:px-12 text-white font-sans">
       <div className="max-w-xl mx-auto">
         <button 
           onClick={onClose}
@@ -117,7 +85,7 @@ export default function MovieRequest({ onClose, userIp }: MovieRequestProps) {
         >
           <div className="text-center mb-6 sm:mb-8">
             <h1 className="text-2xl sm:text-3xl font-black tracking-tighter italic uppercase mb-1 bg-gradient-to-r from-white to-zinc-500 bg-clip-text text-transparent">
-              Movie Request
+              Content Request
             </h1>
             <p className="text-zinc-600 text-[8px] font-black uppercase tracking-[0.4em] opacity-80">Tell us what's missing</p>
           </div>

@@ -9,7 +9,7 @@ import {
   LayoutGrid, PlusCircle, ShieldCheck, Search, Pencil, Trash2, X, 
   Menu, Play, Trash, Check, Globe, Calendar, FileText,
   Clapperboard, ListVideo, AlertTriangle, BrainCircuit, TrendingDown, TrendingUp, Scan,
-  CircleUser, ChevronRight, RefreshCw, UserCheck
+  CircleUser, ChevronRight, RefreshCw, UserCheck, Film, LogOut, Clock, ArrowUpRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast, ToastContainer } from 'react-toastify';
@@ -17,7 +17,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import Tesseract from 'tesseract.js';
 import 'react-toastify/dist/ReactToastify.css';
 
-type ViewType = 'dashboard' | 'upload' | 'users' | 'requests' | 'security' | 'registrations';
+type ViewType = 'dashboard' | 'upload' | 'users' | 'requests' | 'security' | 'registrations' | 'plan-requests' | 'settings';
 
 export default function AdminPanel({ 
   onClose, 
@@ -61,8 +61,11 @@ export default function AdminPanel({
   const [movies, setMovies] = useState<Movie[]>([]);
   const [movieRequests, setMovieRequests] = useState<any[]>([]);
   const [memberRequests, setMemberRequests] = useState<any[]>([]);
+  const [upgradeRequests, setUpgradeRequests] = useState<any[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [systemSettings, setSystemSettings] = useState({ upiId: '', merchantName: 'Bharat Prime' });
   const [searchQuery, setSearchQuery] = useState('');
+  const [inventorySearch, setInventorySearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUserSubmitting, setIsUserSubmitting] = useState(false);
   const [isOcrLoading, setIsOcrLoading] = useState(false);
@@ -95,7 +98,7 @@ export default function AdminPanel({
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, "movieRequests"), orderBy("timestamp", "desc"));
+    const q = query(collection(db, "requests"), orderBy("timestamp", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMovieRequests(list);
@@ -121,6 +124,44 @@ export default function AdminPanel({
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "upgradeRequests"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setUpgradeRequests(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "system", "config"), (docSnap) => {
+      if (docSnap.exists()) {
+        setSystemSettings(docSnap.data() as any);
+      } else {
+        // Initialize with defaults if doesn't exist
+        setDoc(doc(db, "system", "config"), { 
+          upiId: '', 
+          merchantName: 'Bharat Prime',
+          updatedAt: serverTimestamp()
+        });
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await setDoc(doc(db, "system", "config"), {
+        ...systemSettings,
+        updatedAt: serverTimestamp()
+      });
+      toast.success("System Configuration Saved");
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
 
   const calculateFinance = (userList: any[]) => {
     let rev = 0;
@@ -332,6 +373,7 @@ export default function AdminPanel({
       trxId: user.trxId || '',
       features: Array.isArray(user.features) ? user.features.join(', ') : ''
     });
+    setActiveView('users'); // Ensure view switches to form
   };
 
   const resetUserForm = () => {
@@ -446,7 +488,7 @@ export default function AdminPanel({
 
   const handleSolveRequest = async (id: string) => {
     try {
-      await updateDoc(doc(db, "movieRequests", id), { status: 'solved' });
+      await updateDoc(doc(db, "requests", id), { status: 'solved' });
       toast.success("Marked as Solved");
     } catch (error: any) {
       toast.error(error.message);
@@ -456,7 +498,7 @@ export default function AdminPanel({
   const handleDeleteRequest = async (id: string) => {
     if (window.confirm("Reject and delete this request?")) {
       try {
-        await deleteDoc(doc(db, "movieRequests", id));
+        await deleteDoc(doc(db, "requests", id));
         toast.info("Request Removed");
       } catch (error: any) {
         toast.error(error.message);
@@ -469,7 +511,7 @@ export default function AdminPanel({
     try {
       const solved = movieRequests.filter(r => r.status === 'solved');
       const batch = writeBatch(db);
-      solved.forEach(r => batch.delete(doc(db, "movieRequests", r.id)));
+      solved.forEach(r => batch.delete(doc(db, "requests", r.id)));
       await batch.commit();
       toast.info("Solved Requests Cleared");
     } catch (error: any) {
@@ -491,7 +533,7 @@ export default function AdminPanel({
   };
 
   const filteredMovies = movies.filter(m => {
-    const matchesSearch = m.title?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (m.title?.toLowerCase().includes(inventorySearch.toLowerCase()) || m.title?.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesFilter = activeFilter === 'All' || m.category === activeFilter;
     return matchesSearch && matchesFilter;
   });
@@ -545,6 +587,7 @@ export default function AdminPanel({
         startDate,
         expiry,
         expiryDate: expiry, // Keep both for safety
+        trxId: req.transactionId || '',
         createdAt: serverTimestamp(),
         isActive: true
       });
@@ -568,594 +611,635 @@ export default function AdminPanel({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[500] bg-[#121212] text-white font-sans flex overflow-hidden">
-      <ToastContainer position="top-right" theme="dark" aria-label="Notifications" />
+  const handleApprovePlanRequest = async (req: any) => {
+    try {
+      const userRef = doc(db, "users", req.userId);
+      const userSnap = await getDoc(userRef);
       
-      {/* Sidebar */}
-      <aside className={`bg-[#0d0d0d] border-r border-[#222] transition-all duration-300 flex flex-col z-[510] ${isSidebarCollapsed ? 'w-0 -translate-x-full md:w-20 md:translate-x-0' : 'w-full md:w-[280px]'}`}>
-        <div className="p-4 h-16 border-b border-[#222] flex items-center justify-between">
-          {!isSidebarCollapsed && <span className="text-[#e50914] font-black text-sm tracking-widest italic">BHARAT PRIME | ELITE</span>}
-          <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="p-2 hover:bg-white/5 rounded-lg md:hidden">
-            <X size={20} />
-          </button>
-        </div>
+      if (!userSnap.exists()) {
+        toast.error("User not found");
+        return;
+      }
+
+      const userData = userSnap.data();
+      let currentExpiry = new Date(userData.expiryDate || userData.expiry || Date.now());
+      if (currentExpiry < new Date()) currentExpiry = new Date();
+
+      const planName = req.planName || '';
+      let daysToAdd = 7;
+      let price = '₹19';
+      
+      if (planName.includes('Monthly') || planName.includes('55')) {
+        daysToAdd = 30;
+        price = '₹55';
+      } else if (planName.includes('90') || planName.includes('149')) {
+        daysToAdd = 90;
+        price = '₹149';
+      }
+
+      currentExpiry.setDate(currentExpiry.getDate() + daysToAdd);
+      const newExpiry = currentExpiry.toISOString().split('T')[0];
+
+      const updateData: any = {
+        expiry: newExpiry,
+        expiryDate: newExpiry,
+        plan: planName,
+        planName: planName,
+        planPrice: price,
+        amount: price.replace(/\D/g, ''),
+        trxId: req.transactionId || '',
+        updatedAt: serverTimestamp()
+      };
+
+      await updateDoc(userRef, updateData);
+      await deleteDoc(doc(db, "upgradeRequests", req.id));
+      toast.success(`Plan upgraded to ${planName} for ${req.userId}`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Approval failed");
+    }
+  };
+
+  const handleRejectPlanRequest = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "upgradeRequests", id));
+      toast.info("Request rejected and removed");
+    } catch (err) {
+      console.error(err);
+      toast.error("Rejection failed");
+    }
+  };
+
+  const handleClearExpiredUsers = async () => {
+    if (!window.confirm("CRITICAL: This will permanently delete ALL expired members from the database. Proceed?")) return;
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const expired = users.filter(u => (u.expiryDate || u.expiry) && (u.expiryDate || u.expiry) < today);
+      if (expired.length === 0) {
+        toast.info("No expired members found");
+        return;
+      }
+      const batch = writeBatch(db);
+      expired.forEach(u => batch.delete(doc(db, "users", u.id)));
+      await batch.commit();
+      toast.success(`${expired.length} Expired members purged`);
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
+  const handleClearPlanRequests = async () => {
+    if (!window.confirm("Clear all processed plan requests?")) return;
+    try {
+      const processed = upgradeRequests.filter(r => r.status !== 'pending');
+      const batch = writeBatch(db);
+      processed.forEach(r => batch.delete(doc(db, "upgradeRequests", r.id)));
+      await batch.commit();
+      toast.info("Requests Cleared");
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[500] bg-[#050505] text-gray-200 font-sans flex overflow-hidden">
+      <ToastContainer position="top-right" theme="dark" autoClose={3000} aria-label="Notifications" />
+      
+      {/* Drawer Wrapper for Mobile */}
+      <div className="drawer lg:drawer-open w-full h-full">
+        <input id="admin-drawer" type="checkbox" className="drawer-toggle" checked={!isSidebarCollapsed} onChange={(e) => setIsSidebarCollapsed(!e.target.checked)} />
         
-        <nav className="flex-1 p-3 space-y-1">
-          <button 
-            onClick={() => { setActiveView('dashboard'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
-            className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all font-black text-[9px] uppercase tracking-widest ${activeView === 'dashboard' ? 'bg-[#1f1f1f] text-white border-l-2 border-[#e50914]' : 'text-[#555] hover:bg-[#1f1f1f] hover:text-white'}`}
-          >
-            <LayoutGrid size={16} />
-            {!isSidebarCollapsed && <span>Dashboard</span>}
-          </button>
-          <button 
-            onClick={() => { setActiveView('upload'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
-            className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all font-black text-[9px] uppercase tracking-widest ${activeView === 'upload' ? 'bg-[#1f1f1f] text-white border-l-2 border-[#e50914]' : 'text-[#555] hover:bg-[#1f1f1f] hover:text-white'}`}
-          >
-            <PlusCircle size={16} />
-            {!isSidebarCollapsed && <span>Add Content</span>}
-          </button>
-          <button 
-            onClick={() => { setActiveView('users'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
-            className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all font-black text-[9px] uppercase tracking-widest ${activeView === 'users' ? 'bg-[#1f1f1f] text-white border-l-2 border-[#e50914]' : 'text-[#555] hover:bg-[#1f1f1f] hover:text-white'}`}
-          >
-            <ShieldCheck size={16} />
-            {!isSidebarCollapsed && <span>Members</span>}
-          </button>
-          <button 
-            onClick={() => { setActiveView('registrations'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
-            className={`w-full flex items-center justify-between p-3 rounded-lg transition-all font-black text-[9px] uppercase tracking-widest ${activeView === 'registrations' ? 'bg-[#1f1f1f] text-white border-l-2 border-[#e50914]' : 'text-[#555] hover:bg-[#1f1f1f] hover:text-white'}`}
-          >
-            <div className="flex items-center gap-3">
-              <CircleUser size={16} />
-              {!isSidebarCollapsed && <span>Member Requests</span>}
-            </div>
-            {!isSidebarCollapsed && memberRequests.length > 0 && (
-              <span className="bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black animate-pulse">
-                {memberRequests.length}
-              </span>
-            )}
-          </button>
-          <button 
-            onClick={() => { setActiveView('requests'); if(window.innerWidth < 768) setIsSidebarCollapsed(true); }}
-            className={`w-full flex items-center justify-between p-3 rounded-lg transition-all font-black text-[9px] uppercase tracking-widest ${activeView === 'requests' ? 'bg-[#1f1f1f] text-white border-l-2 border-[#e50914]' : 'text-[#555] hover:bg-[#1f1f1f] hover:text-white'}`}
-          >
-            <div className="flex items-center gap-3">
-              <FileText size={16} />
-              {!isSidebarCollapsed && <span>User Requests</span>}
-            </div>
-            {!isSidebarCollapsed && stats.pendingRequests > 0 && (
-              <span className="bg-[#e50914] text-white text-[8px] px-1.5 py-0.5 rounded-full font-black">
-                {stats.pendingRequests}
-              </span>
-            )}
-          </button>
-        </nav>
-
-        <div className="p-3 border-t border-[#222]">
-          <button onClick={onClose} className="w-full flex items-center gap-3 p-3 rounded-lg text-[#444] hover:bg-red-600/10 hover:text-red-500 transition-all font-black text-[9px] uppercase tracking-widest">
-            <X size={16} />
-            {!isSidebarCollapsed && <span>Close Admin</span>}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto bg-[#0a0a0a] relative">
-        <div className="p-6 md:p-10 max-w-7xl mx-auto">
-          
-          {/* Expiry Warning Banner */}
-          <AnimatePresence>
-            {expiryWarning && (
-              <motion.div 
-                initial={{ height: 0, opacity: 0, marginBottom: 0 }}
-                animate={{ height: 'auto', opacity: 1, marginBottom: 24 }}
-                exit={{ height: 0, opacity: 0, marginBottom: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="bg-red-600/10 border border-red-600/30 rounded-2xl p-4 flex items-center gap-4">
-                  <div className="w-10 h-10 bg-red-600/20 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <AlertTriangle className="text-red-600" size={20} />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-red-500 text-sm font-bold">{expiryWarning}</p>
-                  </div>
-                  <button 
-                    onClick={() => setActiveView('security')}
-                    className="bg-red-600 hover:bg-red-700 text-white text-xs font-black px-4 py-2 rounded-lg transition-all uppercase tracking-widest"
-                  >
-                    Update Now
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
+        {/* Main Content */}
+        <div className="drawer-content flex flex-col h-full overflow-hidden bg-[#0a0a0a]">
           {/* Header */}
-          <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+          <header className="flex justify-between items-center p-6 lg:p-8 border-b border-white/5 bg-[#050505]/50 backdrop-blur-md z-20">
             <div className="flex items-center gap-4">
-              <button 
-                onClick={() => setIsSidebarCollapsed(false)} 
-                className="p-3 bg-[#1a1a1a] border border-[#222] rounded-xl md:hidden text-white hover:bg-red-600/10 transition-all"
-              >
+              <label htmlFor="admin-drawer" className="btn btn-ghost btn-circle lg:hidden">
                 <Menu size={20} />
-              </button>
+              </label>
               <div>
-                <h5 className="text-[#888] text-[10px] font-black uppercase tracking-[0.3em] mb-1">Control Center</h5>
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter">
-                  {activeView === 'dashboard' ? 'Overview' : activeView === 'upload' ? 'Publish Content' : activeView === 'users' ? 'Member Access' : 'Inbound Requests'}
-                </h2>
+                <h2 className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.5em] mb-1 italic opacity-60">Elite Command Center</h2>
+                <h1 className="text-xl sm:text-2xl font-black text-white uppercase italic tracking-tighter">
+                  {activeView === 'dashboard' ? 'Inertia Overview' : 
+                   activeView === 'registrations' ? 'Member Approvals' : 
+                   activeView === 'upload' ? 'Database Matrix' : 
+                   activeView === 'users' ? 'Onboarding Deck' : 
+                   activeView === 'requests' ? 'Content Requests' : 
+                   activeView === 'plan-requests' ? 'Upgrade Requests' : 'Security Shield'}
+                </h1>
               </div>
             </div>
             
-            <div className="relative w-full md:w-96 group">
-              <i className="absolute left-5 top-1/2 -translate-y-1/2 text-[#555] group-focus-within:text-[#e50914] transition-colors">
-                <Search size={18} />
-              </i>
-              <input 
-                type="text" 
-                placeholder="Search across all database..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full bg-[#111] border border-[#222] rounded-2xl py-4 pl-14 pr-6 focus:border-[#e50914] focus:bg-[#1a1a1a] outline-none transition-all text-sm font-bold shadow-2xl"
-              />
+            <div className="flex items-center gap-4">
+              <div className="relative hidden md:block">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                <input 
+                  type="text" 
+                  placeholder="Search anything..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="input input-sm h-10 w-64 pl-10 bg-zinc-900 border-white/5 focus:border-[#e50914] transition-all text-xs font-bold" 
+                />
+              </div>
+              <div className="dropdown dropdown-end">
+                <div tabIndex={0} role="button" className="avatar placeholder ring-1 ring-white/10 ring-offset-base-100 ring-offset-2 rounded-full cursor-pointer">
+                  <div className="bg-red-600 text-white rounded-full w-10 font-black italic">
+                    <span>AD</span>
+                  </div>
+                </div>
+                <ul tabIndex={0} className="dropdown-content z-50 menu p-2 shadow-2xl bg-zinc-900 border border-white/5 rounded-xl w-52 mt-4">
+                  <li><a onClick={() => setActiveView('settings')} className="text-[9px] font-black uppercase tracking-[0.2em] py-3 hover:bg-blue-600/10 transition-colors">System Settings</a></li>
+                  <li><a onClick={() => setActiveView('security')} className="text-[9px] font-black uppercase tracking-[0.2em] py-3 hover:bg-red-600/10 transition-colors">Security Matrix</a></li>
+                  <li><a onClick={onClose} className="text-[9px] font-black uppercase tracking-[0.2em] py-3 text-red-500 hover:bg-red-500/10">Terminate Session</a></li>
+                </ul>
+              </div>
             </div>
           </header>
 
-          <AnimatePresence mode="wait">
-            {activeView === 'dashboard' && (
-              <motion.div 
-                key="dashboard"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-10"
-              >
-                <div className="bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border border-[#222] p-8 rounded-[1.5rem] relative overflow-hidden shadow-2xl">
-                  <div className="relative z-10">
-                    <h1 className="text-3xl font-black mb-1 uppercase tracking-tighter italic drop-shadow-2xl">Elite Control</h1>
-                    <p className="text-[#444] font-black text-[9px] uppercase tracking-[0.4em] mb-10">System Management & Financial Logic.</p>
-                    
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                      <div className="bg-black/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl hover:border-white/10 transition-all group shadow-2xl">
-                        <h3 className="text-2xl font-black mb-1 group-hover:text-white transition-colors">{stats.total}</h3>
-                        <span className="text-[8px] font-black text-[#444] uppercase tracking-[0.3em] group-hover:text-[#666]">TOTAL ASSETS</span>
+          {/* Scrollable View Area */}
+          <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar">
+            <AnimatePresence mode="wait">
+              {activeView === 'dashboard' && (
+                <motion.div 
+                  key="dashboard"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="space-y-8"
+                >
+                  {/* Top Stats Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {[
+                      { label: 'Total Assets', value: stats.total, color: 'border-red-600', text: 'text-white' },
+                      { label: 'Active Members', value: stats.totalUsers, color: 'border-green-500', text: 'text-green-500' },
+                      { label: 'Pending Requests', value: stats.pendingRequests, color: 'border-yellow-500', text: 'text-yellow-500' },
+                      { label: 'Live Movies', value: stats.movies, color: 'border-blue-500', text: 'text-blue-500' }
+                    ].map((s, i) => (
+                      <div key={i} className={`glass-card p-6 border-b-4 ${s.color} hover:translate-y-[-4px] transition-all duration-300`}>
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{s.label}</p>
+                        <div className={`text-4xl font-black mt-2 tracking-tighter ${s.text}`}>{s.value}</div>
                       </div>
-                      <div className="bg-black/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl hover:border-green-600/30 transition-all group shadow-2xl">
-                        <h3 className="text-2xl font-black mb-1 text-green-500">{stats.totalUsers}</h3>
-                        <span className="text-[8px] font-black text-[#444] uppercase tracking-[0.3em] group-hover:text-[#666]">ACTIVE MEMBERS</span>
-                      </div>
-                      <div className="bg-black/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl hover:border-yellow-500/30 transition-all group shadow-2xl">
-                        <h3 className="text-2xl font-black mb-1 text-yellow-500">{stats.pendingRequests}</h3>
-                        <span className="text-[8px] font-black text-[#444] uppercase tracking-[0.3em] group-hover:text-[#666]">PENDING REQS</span>
-                      </div>
-                      <div className="bg-black/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl hover:border-red-600/30 transition-all group shadow-2xl">
-                        <h3 className="text-2xl font-black mb-1 text-[#e50914]">{stats.movies}</h3>
-                        <span className="text-[8px] font-black text-[#444] uppercase tracking-[0.3em] group-hover:text-[#666]">MOVIE ASSETS</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-[#e50914]/5 blur-[120px] rounded-full -translate-y-1/2 translate-x-1/2" />
-                </div>
-
-                <div className="bg-[#111] border border-[#222] p-8 md:p-10 rounded-[2rem] shadow-2xl">
-                  <div className="flex flex-col md:flex-row justify-between md:items-center gap-6 mb-10">
-                    <div>
-                      <h4 className="text-xl font-black uppercase italic tracking-tighter">Financial Analytics</h4>
-                      <p className="text-[10px] font-black text-[#555] uppercase tracking-widest mt-1">Real-time revenue matching logic</p>
-                    </div>
-                    <div className="flex items-center gap-8">
-                      <div className="text-right">
-                        <p className="text-[10px] font-black text-[#555] uppercase tracking-widest mb-1">Total Revenue</p>
-                        <h4 className="text-2xl font-black text-green-500">₹{financeStats.revenue}</h4>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] font-black text-[#555] uppercase tracking-widest mb-1">Total Expenses</p>
-                        <h4 className="text-2xl font-black text-red-600">₹{financeStats.expenses}</h4>
-                      </div>
-                    </div>
+                    ))}
                   </div>
 
-                  <div className="grid lg:grid-cols-3 gap-10">
-                    <div className="lg:col-span-2 h-[350px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={financeStats.breakdown}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
-                          <XAxis 
-                            dataKey="name" 
-                            stroke="#555" 
-                            fontSize={10} 
-                            tickLine={false} 
-                            axisLine={false}
-                            tick={{ fontWeight: 800, textTransform: 'uppercase' }}
-                          />
-                          <YAxis stroke="#555" fontSize={10} tickLine={false} axisLine={false} tick={{ fontWeight: 800 }} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '12px' }}
-                            itemStyle={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase' }}
-                            cursor={{ fill: '#ffffff05' }}
-                          />
-                          <Bar dataKey="value" radius={[6, 6, 0, 0]} barSize={50}>
-                            {financeStats.breakdown.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+                  {/* Main Analytics Hub */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div className="lg:col-span-2 glass-card p-8">
+                      <div className="flex justify-between items-center mb-10">
+                        <div>
+                          <h3 className="text-lg font-black uppercase italic tracking-tighter">Matched Revenue Analytics</h3>
+                          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Live subscription-payment delta</p>
+                        </div>
+                        <div className="badge badge-error badge-outline px-4 py-3 text-[10px] font-black uppercase tracking-widest rounded-lg">Real-Time</div>
+                      </div>
+                      <div className="h-80 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={financeStats.breakdown} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                            <XAxis 
+                              dataKey="name" 
+                              stroke="#444" 
+                              fontSize={9} 
+                              tickLine={false} 
+                              axisLine={false}
+                              tick={{ fontWeight: 900, textTransform: 'uppercase' }}
+                              dy={10}
+                            />
+                            <YAxis stroke="#444" fontSize={9} tickLine={false} axisLine={false} tick={{ fontWeight: 900 }} />
+                            <Tooltip 
+                              cursor={{ fill: 'rgba(255,255,255,0.02)' }}
+                              content={({ active, payload }) => {
+                                if (active && payload && payload.length) {
+                                  return (
+                                    <div className="glass-card p-4 border-white/5 backdrop-blur-2xl shadow-2xl">
+                                      <p className="text-[9px] font-black uppercase text-zinc-500 mb-1">{payload[0].payload.name}</p>
+                                      <p className="text-lg font-black text-white italic" style={{ color: payload[0].payload.color }}>₹{payload[0].value}</p>
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              }}
+                            />
+                            <Bar dataKey="value" radius={[10, 10, 0, 0]} barSize={55}>
+                              {financeStats.breakdown.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} fillOpacity={0.8} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
-                    
+
                     <div className="space-y-6">
-                      <div className="bg-[#1a1a1a] border-l-4 border-blue-500 p-6 rounded-2xl">
+                      <div className="glass-card p-6 bg-blue-600/5 border-blue-500/20">
                         <div className="flex items-center gap-3 mb-4">
-                          <BrainCircuit size={20} className="text-blue-500" />
-                          <h6 className="text-[10px] font-black text-blue-500 uppercase tracking-widest">AI Financial Advisor</h6>
+                          <div className="p-2 bg-blue-600 rounded-xl"><BrainCircuit className="w-5 h-5 text-white" /></div>
+                          <h4 className="font-black text-[10px] text-blue-400 uppercase tracking-widest">AI Financial Insights</h4>
                         </div>
-                        <p className="text-xs text-[#888] font-bold leading-relaxed">
+                        <p className="text-xs text-gray-400 leading-relaxed italic font-medium">
                           {financeStats.revenue - financeStats.expenses > 0 
-                            ? "Revenue successfully exceeds current operating costs. Scalability is healthy. Consider upgrading server bandwidth for growing user base."
-                            : "System operating at deficit. Focus on membership retention and standardizing Ultimate Plan upgrades to cover ₹1500 monthly costs."}
+                            ? "Revenue matching logic confirms profitability. Current burn rate is sustainable against verified subscription IDs."
+                            : "Operational burn exceeds matched revenue. Suggest increasing '90-Day VIP' conversions to offset overhead."}
                         </p>
                       </div>
 
-                      <div className={`bg-[#1a1a1a] border border-[#222] p-6 rounded-2xl ${financeStats.revenue - financeStats.expenses > 0 ? 'border-green-600/30' : 'border-red-600/30'}`}>
-                        <div className="flex items-center gap-3 mb-2">
-                          {financeStats.revenue - financeStats.expenses > 0 
-                            ? <TrendingUp size={24} className="text-green-500" />
-                            : <TrendingDown size={24} className="text-red-500" />
-                          }
-                          <h6 className="text-[10px] font-black uppercase tracking-widest text-[#555]">Business Status</h6>
+                      <div className="glass-card p-6 border-white/5 bg-zinc-900/30">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="p-2 bg-zinc-800 rounded-xl"><Film className="w-5 h-5 text-zinc-400" /></div>
+                          <h4 className="font-black text-[10px] text-zinc-400 uppercase tracking-widest">Core Framework Logs</h4>
                         </div>
-                        <h4 className={`text-2xl font-black mb-2 ${financeStats.revenue - financeStats.expenses > 0 ? 'text-green-500' : 'text-red-600'}`}>
-                          {financeStats.revenue - financeStats.expenses > 0 ? 'STATUS: PROFIT' : 'STATUS: LOSS'}
-                        </h4>
-                        <p className="text-[10px] font-black text-[#444] uppercase tracking-widest">
-                          Matched Balance: {Math.abs(financeStats.revenue - financeStats.expenses)} RS
+                        <ul className="space-y-3">
+                          {[
+                            'Enhanced Content Request Logic',
+                            'Universal UPI Sync Engine',
+                            'Real-time UTR Verification Hook',
+                            'Elite System Config Matrix',
+                            'Automated OCR Plan Verification'
+                          ].map((log, i) => (
+                            <li key={i} className="flex items-start gap-3 text-[10px] font-bold text-zinc-500 uppercase tracking-tight">
+                              <span className="w-1.5 h-1.5 bg-red-600 rounded-full mt-1 shrink-0" />
+                              {log}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className={`glass-card p-6 transition-all duration-500 border-l-4 ${financeStats.revenue - financeStats.expenses > 0 ? 'border-green-500' : 'border-red-600'}`}>
+                        <h4 className="font-black text-sm uppercase tracking-widest mb-1 italic">Financial Health</h4>
+                        <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">
+                          {financeStats.revenue - financeStats.expenses > 0 ? 'STATUS: SOLVENT' : 'STATUS: DEFICIT'}
                         </p>
-                        
-                        <div className="p-4 bg-blue-500/10 border-l-4 border-blue-500 rounded-r-xl mt-4">
-                          <p className="text-blue-500 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 mb-1">
-                            <BrainCircuit size={14} /> AI Finance Advisor
-                          </p>
-                          <p className="text-zinc-400 text-[10px] font-medium leading-relaxed italic">
-                            {financeStats.revenue - financeStats.expenses > 0 
-                              ? "Net positive revenue achieved. Subscription-Payment parity verified with strict matching logic."
-                              : "Operating at loss. Match logic ensures only verified payments count. Review your fixed costs."}
-                          </p>
+                        <div className="mt-6 flex items-baseline gap-2">
+                          <span className={`text-4xl font-black italic tracking-tighter ${financeStats.revenue - financeStats.expenses > 0 ? 'text-green-500' : 'text-red-600'}`}>
+                            {Math.abs(financeStats.revenue - financeStats.expenses)}
+                          </span>
+                          <span className="text-xs font-black opacity-30 uppercase tracking-widest">RS DELTA</span>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </motion.div>
-            )}
+                </motion.div>
+              )}
 
             {activeView === 'upload' && (
               <motion.div 
                 key="upload"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="bg-[#141414] border border-[#222] p-5 rounded-2xl shadow-2xl"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="space-y-8"
               >
-                <h4 className="text-sm font-black mb-5 flex items-center gap-3 italic">
-                  <PlusCircle className="text-[#e50914]" size={18} /> {editId ? 'UPDATE CONTENT' : 'PUBLISH CONTENT'}
-                </h4>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    <div className="space-y-1.5 lg:col-span-2">
-                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Title</label>
-                      <input 
-                        type="text" 
-                        value={formData.title}
-                        onChange={e => setFormData({...formData, title: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium"
-                        placeholder="Movie Name"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Print Quality</label>
-                      <select 
-                        value={formData.quality}
-                        onChange={e => setFormData({...formData, quality: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium appearance-none"
-                      >
-                        <option value="HD">HD</option>
-                        <option value="HQ">HQ</option>
-                        <option value="HDTC">HDTC</option>
-                        <option value="HDTS">HDTS</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Release Year</label>
-                      <input 
-                        type="text" 
-                        value={formData.year}
-                        onChange={e => setFormData({...formData, year: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium"
-                        placeholder="Ex: 2026"
-                      />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Media Metadata Section */}
+                  <div className="glass-card p-8">
+                    <div className="flex items-center gap-3 mb-8">
+                      <div className="p-2.5 bg-red-600 rounded-xl shadow-[0_0_15px_rgba(229,9,20,0.4)]"><Clapperboard className="text-white w-5 h-5" /></div>
+                      <h3 className="text-lg font-black uppercase italic tracking-tighter text-white">Media Intelligence Metadata</h3>
                     </div>
                     
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Image URL</label>
-                      <input 
-                        type="text" 
-                        value={formData.image}
-                        onChange={e => setFormData({...formData, image: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium"
-                        placeholder="https://..."
-                      />
-                    </div>
-                    
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Category</label>
-                      <select 
-                        value={formData.category}
-                        onChange={e => setFormData({...formData, category: e.target.value})}
-                        className="w-full bg-[#1f1f1f] border border-[#333] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-medium appearance-none"
-                      >
-                        <option value="Movie">Movie</option>
-                        <option value="Series">Web Series</option>
-                        <option value="Banner">Banner</option>
-                      </select>
-                    </div>
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="col-span-2 space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Universal Title</label>
+                        <input 
+                          type="text" 
+                          value={formData.title}
+                          onChange={e => setFormData({...formData, title: e.target.value})}
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-xs font-black placeholder:text-zinc-800 text-white"
+                          placeholder="Ex: Avatar: Frontiers of Pandora"
+                        />
+                      </div>
 
-                      {formData.category !== 'Banner' && (
-                        <div className="space-y-1.5 lg:col-span-3">
-                          <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Audio Language</label>
-                          <select 
-                            value={formData.language}
-                            onChange={e => setFormData({...formData, language: e.target.value})}
-                            className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-bold appearance-none"
-                          >
-                            <option value="Kannada">Kannada</option>
-                            <option value="Tamil">Tamil</option>
-                            <option value="Telugu">Telugu</option>
-                            <option value="Hindi">Hindi</option>
-                            <option value="Malayalam">Malayalam</option>
-                            <option value="English">English</option>
-                            <option value="Multi">Multi-Audio</option>
-                          </select>
-                        </div>
-                      )}
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Streaming Quality</label>
+                        <select 
+                          value={formData.quality}
+                          onChange={e => setFormData({...formData, quality: e.target.value})}
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-3 px-5 focus:border-[#e50914] outline-none transition-all text-xs font-black appearance-none cursor-pointer text-white"
+                        >
+                          <option value="HD">HD HIGH</option>
+                           <option value="HQ">HQ ULTRA</option>
+                           <option value="HDTC">HDTC CAM</option>
+                           <option value="HDTS">HDTS BOOTLEG</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Release Cycle</label>
+                        <input 
+                          type="text" 
+                          value={formData.year}
+                          onChange={e => setFormData({...formData, year: e.target.value})}
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-3 px-5 focus:border-[#e50914] outline-none transition-all text-xs font-black text-white"
+                          placeholder="2026"
+                        />
+                      </div>
+
+                      <div className="col-span-2 space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Cinematic Poster URL</label>
+                        <input 
+                          type="text" 
+                          value={formData.image}
+                          onChange={e => setFormData({...formData, image: e.target.value})}
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-4 px-5 focus:border-[#e50914] outline-none transition-all text-xs font-black text-white"
+                          placeholder="https://image-server.com/..."
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Content Category</label>
+                        <select 
+                          value={formData.category}
+                          onChange={e => setFormData({...formData, category: e.target.value})}
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-3 px-5 focus:border-[#e50914] outline-none transition-all text-xs font-black appearance-none cursor-pointer text-white"
+                        >
+                          <option value="Movie">Featured Movie</option>
+                          <option value="Series">Web Series</option>
+                          <option value="Banner">Promo Banner</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Audio Profile</label>
+                        <select 
+                          value={formData.language}
+                          onChange={e => setFormData({...formData, language: e.target.value})}
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-3 px-5 focus:border-[#e50914] outline-none transition-all text-xs font-black appearance-none cursor-pointer text-white"
+                        >
+                          <option value="Kannada">Kannada</option>
+                           <option value="Tamil">Tamil</option>
+                           <option value="Telugu">Telugu</option>
+                           <option value="Hindi">Hindi</option>
+                           <option value="Malayalam">Malayalam</option>
+                           <option value="English">English</option>
+                           <option value="Multi">Multi-Audio</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Streaming Links</label>
-                    <div className="space-y-2">
+                  {/* Resource Links Section */}
+                  <div className="glass-card p-8 flex flex-col">
+                    <div className="flex items-center gap-3 mb-8">
+                      <div className="p-2.5 bg-blue-600 rounded-xl shadow-[0_0_15px_rgba(37,99,235,0.4)]"><Globe className="text-white w-5 h-5" /></div>
+                      <h3 className="text-lg font-black uppercase italic tracking-tighter text-white">System Resource Links</h3>
+                    </div>
+
+                    <div className="flex-1 space-y-4 max-h-[360px] overflow-y-auto pr-2 custom-scrollbar">
                       {formData.links.map((link, idx) => (
-                        <div key={idx} className="flex gap-2">
-                          <input 
-                            type="text" 
-                            value={link.label}
-                            onChange={e => updateLink(idx, 'label', e.target.value)}
-                            className="w-24 bg-[#1f1f1f] border border-[#333] rounded-lg py-2 px-3 focus:border-[#e50914] outline-none transition-all text-[10px] font-bold"
-                            placeholder="720p"
-                          />
-                          <input 
-                            type="text" 
-                            value={link.url}
-                            onChange={e => updateLink(idx, 'url', e.target.value)}
-                            className="flex-1 bg-[#1f1f1f] border border-[#333] rounded-lg py-2 px-3 focus:border-[#e50914] outline-none transition-all text-[10px] font-medium"
-                            placeholder="URL"
-                          />
+                        <motion.div 
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          key={idx} 
+                          className="flex gap-3 items-center bg-white/[0.03] p-3 rounded-xl border border-white/5 group hover:border-blue-500/30 transition-all shadow-lg"
+                        >
+                          <div className="flex flex-col gap-1 w-20">
+                            <label className="text-[7px] font-black text-zinc-600 uppercase">Res</label>
+                            <input 
+                              type="text" 
+                              value={link.label}
+                              onChange={e => updateLink(idx, 'label', e.target.value)}
+                              className="w-full bg-transparent border-none text-[10px] font-black text-[#e50914] outline-none focus:ring-0 p-0"
+                              placeholder="720p"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1 flex-1">
+                            <label className="text-[7px] font-black text-zinc-600 uppercase">Stream Source URL</label>
+                            <input 
+                              type="text" 
+                              value={link.url}
+                              onChange={e => updateLink(idx, 'url', e.target.value)}
+                              className="w-full bg-transparent border-none text-[10px] font-medium text-zinc-300 outline-none focus:ring-0 p-0"
+                              placeholder="https://cdn.resource.com/..."
+                            />
+                          </div>
                           <button 
                             type="button"
                             onClick={() => removeLinkRow(idx)}
-                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                            className="p-3 text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
                           >
                             <Trash2 size={16} />
                           </button>
-                        </div>
+                        </motion.div>
                       ))}
                     </div>
-                    <button 
-                      type="button" 
-                      onClick={addLinkRow}
-                      className="text-[9px] font-black text-[#888] hover:text-white uppercase tracking-widest flex items-center gap-2 transition-colors"
-                    >
-                      <PlusCircle size={12} /> Add Row
-                    </button>
-                  </div>
 
-                  <div className="flex gap-4 pt-4">
-                    <button 
-                      type="submit" 
-                      disabled={isSubmitting}
-                      className="flex-1 bg-[#e50914] hover:bg-[#ff0f1a] disabled:bg-[#8b0000] text-white font-black py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(229,9,20,0.3)] active:scale-95 uppercase tracking-widest text-xs"
-                    >
-                      {isSubmitting ? 'PROCESSING...' : (editId ? 'UPDATE NOW' : 'PUBLISH NOW')}
-                    </button>
-                    {editId && (
+                    <div className="mt-8 space-y-5">
                       <button 
                         type="button" 
-                        onClick={resetForm}
-                        className="px-8 bg-[#222] hover:bg-[#333] text-white font-black rounded-xl transition-all active:scale-95 uppercase tracking-widest text-xs"
+                        onClick={addLinkRow}
+                        className="w-full btn btn-ghost h-12 border-2 border-dashed border-zinc-800 hover:border-blue-500/50 hover:bg-blue-600/5 text-[9px] font-black uppercase tracking-widest gap-3 rounded-xl transition-all"
                       >
-                        DISCARD
+                        <PlusCircle size={14} /> Add Resolution Matrix Row
                       </button>
-                    )}
+
+                      <div className="flex gap-4 pt-4 border-t border-white/5">
+                        <button 
+                          onClick={handleSubmit}
+                          disabled={isSubmitting}
+                          className="flex-1 btn bg-red-600 border-none hover:bg-red-700 text-white font-black text-[10px] uppercase tracking-widest h-14 rounded-2xl shadow-[0_10px_30px_rgba(229,9,20,0.3)] active:scale-95 transition-all"
+                        >
+                          {isSubmitting ? 'SYNCING DATABASE...' : (editId ? 'UPDATE CONTENT PROFILE' : 'PUBLISH LIVE CONTENT')}
+                        </button>
+                        {editId && (
+                          <button 
+                            type="button" 
+                            onClick={resetForm}
+                            className="btn bg-zinc-800 border-none hover:bg-zinc-700 text-white font-black text-[10px] uppercase tracking-widest h-14 px-8 rounded-2xl transition-all"
+                          >
+                            DISCARD
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </form>
+                </div>
+
+                {/* Inventory Overview */}
+                <div className="space-y-6 pt-10 border-t border-white/5">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-6 px-2">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-zinc-800 rounded-xl"><ListVideo className="text-white w-4 h-4" /></div>
+                      <h4 className="text-sm font-black uppercase italic tracking-tighter text-white">Global Content Inventory</h4>
+                    </div>
+                    
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
+                        <input 
+                          type="text"
+                          placeholder="Search titles..."
+                          value={inventorySearch}
+                          onChange={(e) => setInventorySearch(e.target.value)}
+                          className="bg-zinc-900 border border-white/5 rounded-xl py-2 pl-9 pr-4 text-[10px] font-bold outline-none focus:border-red-600 w-48 transition-all"
+                        />
+                      </div>
+                      <div className="flex bg-zinc-900/50 p-1 rounded-xl border border-white/5 backdrop-blur-sm">
+                        {['All', 'Movie', 'Series', 'Banner'].map((filter) => (
+                          <button
+                            key={filter}
+                            onClick={() => setActiveFilter(filter as any)}
+                            className={`px-6 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeFilter === filter ? 'bg-red-600 text-white shadow-xl shadow-red-600/20' : 'text-zinc-600 hover:text-white'}`}
+                          >
+                            {filter === 'Series' ? 'Series' : filter === 'Banner' ? 'Promo' : filter === 'Movie' ? 'Film' : 'All'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="glass-card overflow-hidden">
+                    <div className="overflow-x-auto custom-scrollbar">
+                      <table className="table w-full border-separate border-spacing-y-2 px-4">
+                        <tbody className="space-y-2">
+                          {filteredMovies.map(movie => (
+                            <tr 
+                              key={movie.id} 
+                              onClick={() => prepareEdit(movie)}
+                              className="bg-white/[0.02] hover:bg-white/[0.04] transition-all group border-none shadow-sm rounded-2xl overflow-hidden cursor-pointer"
+                            >
+                              <td className="p-4 w-20 rounded-l-2xl">
+                                <div className="relative group/poster overflow-hidden rounded-xl">
+                                  <img 
+                                    src={movie.image || undefined} 
+                                    className="w-12 h-16 object-cover border border-white/5 shadow-xl group-hover:scale-110 transition-transform duration-500" 
+                                    alt="" 
+                                    referrerPolicy="no-referrer"
+                                    onError={(e: any) => e.target.src = 'https://via.placeholder.com/100x150?text=No+Img'}
+                                  />
+                                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/poster:opacity-100 transition-opacity flex items-center justify-center">
+                                    <Film size={12} className="text-white" />
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="font-black text-[13px] text-white uppercase italic tracking-tighter group-hover:text-red-500 transition-colors">
+                                    {movie.title} <span className="text-zinc-600 font-bold ml-1">({movie.year || '2026'})</span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <span className={`text-[8px] font-black px-2.5 py-1 rounded-md uppercase tracking-widest ${movie.category === 'Banner' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : movie.category === 'Series' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-red-600/10 text-red-600 border border-red-600/20'}`}>
+                                      {movie.category}
+                                    </span>
+                                    <span className="text-[8px] font-black bg-white/5 text-zinc-500 px-2.5 py-1 rounded-md uppercase tracking-widest border border-white/5">
+                                      {movie.quality || 'HD'}
+                                    </span>
+                                    {movie.language && (
+                                      <span className="text-[8px] font-black bg-white/5 text-zinc-500 px-2.5 py-1 rounded-md uppercase tracking-widest border border-white/5">
+                                        {movie.language}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4 text-right rounded-r-2xl">
+                                <div className="flex gap-2 justify-end">
+                                  <button onClick={(e) => { e.stopPropagation(); prepareEdit(movie); }} className="p-3 bg-blue-600/5 text-blue-500 hover:bg-blue-600 hover:text-white rounded-xl transition-all active:scale-95 border border-blue-600/10 shadow-lg">
+                                    <Pencil size={14} />
+                                  </button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleDelete(movie.id); }} className="p-3 bg-red-600/5 text-red-500 hover:bg-red-600 hover:text-white rounded-xl transition-all active:scale-95 border border-red-600/10 shadow-lg">
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             )}
 
             {activeView === 'users' && (
               <motion.div 
                 key="users"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-6"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="space-y-8"
               >
-                {/* User Form */}
-                <div className="bg-[#141414] border border-[#222] p-5 rounded-2xl shadow-2xl">
-                  <div className="flex justify-between items-center mb-5">
-                    <h2 className="text-xl sm:text-2xl font-black italic uppercase tracking-tighter text-white mb-1">Registration & Renewal</h2>
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        const newPass = Math.random().toString(36).slice(-8).toUpperCase();
-                        setUserFormData(prev => ({ ...prev, password: newPass }));
-                        toast.info("Security Key Generated");
-                      }}
-                      className="flex items-center gap-2 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white border border-blue-600/20 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-                    >
-                      <RefreshCw size={14} /> Auto-Generate
-                    </button>
-                  </div>
-                  
-                  <form onSubmit={handleUserSubmit} className="space-y-5">
-                    <div className="grid md:grid-cols-3 gap-5">
-                      {!userEditId && (
-                        <div className="md:col-span-1">
-                          <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1 mb-1.5 block">Scan Receipt (OCR)</label>
-                          <div className="relative">
-                            <input 
-                              type="file" 
-                              accept="image/*"
-                              onChange={handleOcrScan}
-                              className="hidden" 
-                              id="receipt-upload"
-                            />
-                            <label 
-                              htmlFor="receipt-upload"
-                              className="w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-[#333] hover:border-blue-500/50 rounded-xl cursor-pointer transition-all bg-[#1a1a1a]/50 group h-[80px]"
-                            >
-                              {isOcrLoading ? (
-                                <div className="flex flex-col items-center gap-1 text-blue-500 animate-pulse">
-                                  <Scan size={16} className="animate-spin" />
-                                  <span className="text-[8px] font-black uppercase tracking-widest">SCANNING...</span>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col items-center gap-0.5">
-                                  <Scan size={16} className="text-[#444] group-hover:text-blue-500 transition-colors" />
-                                  <span className="text-[8px] font-black text-[#444] group-hover:text-white transition-colors uppercase tracking-widest text-center px-4">UPLOAD</span>
-                                </div>
-                              )}
-                            </label>
-                          </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Member Onboarding Section */}
+                  <div className="glass-card p-8">
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-green-600 rounded-xl shadow-[0_0_15px_rgba(22,163,74,0.4)]"><CircleUser className="text-white w-5 h-5" /></div>
+                        <h3 className="text-lg font-black uppercase italic tracking-tighter text-white">Member Onboarding Matrix</h3>
                       </div>
-                    )}
-
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Transaction ID</label>
-                      <input 
-                        type="text" 
-                        value={userFormData.trxId}
-                        onChange={e => setUserFormData({...userFormData, trxId: e.target.value})}
-                        className={`w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold ${!userEditId ? 'h-[80px]' : ''}`}
-                        placeholder="EX: BP_99..."
-                      />
+                      {userFormData.userId && users.find(u => u.userId === userFormData.userId) && (
+                        <div className="badge badge-success badge-outline px-4 py-3 text-[8px] font-black uppercase tracking-widest animate-pulse">RENEWAL MODE</div>
+                      )}
                     </div>
 
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Amount Paid</label>
-                      <input 
-                        type="number" 
-                        value={userFormData.planPrice.replace(/[^0-9]/g, '')}
-                        onChange={e => {
-                          const val = e.target.value;
-                          let plan = 'Weekly (19 RS)';
-                          if(val === '149') plan = '90 Days (149 RS)';
-                          else if(val === '55') plan = 'Monthly (55 RS)';
-                          
-                          setUserFormData({...userFormData, planPrice: `₹${val}`, planName: plan});
-                        }}
-                        className={`w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold ${!userEditId ? 'h-[80px]' : ''}`}
-                        placeholder="149"
-                      />
-                    </div>
-
-                      {/* Credentials Row */}
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">User ID</label>
+                    <form className="grid grid-cols-2 gap-6" onSubmit={(e) => { e.preventDefault(); handleUserSubmit(e); }}>
+                      <div className="col-span-2 space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Universal Member ID</label>
                         <input 
                           type="text" 
                           value={userFormData.userId}
-                          onChange={e => {
-                            const id = e.target.value;
-                            setUserFormData({...userFormData, userId: id});
-                            const existingUser = users.find(u => u.userId === id);
-                            if (existingUser) {
-                              setIsRenewalMode(true);
-                              setUserFormData({
-                                ...userFormData,
-                                userId: id,
-                                name: existingUser.name || '',
-                                password: existingUser.password || '',
-                                startDate: new Date().toISOString().split('T')[0]
-                              });
-                            } else {
-                              setIsRenewalMode(false);
-                            }
-                          }}
-                          className={`w-full bg-[#111] border ${isRenewalMode ? 'border-blue-500' : 'border-[#222]'} rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold`}
-                          placeholder="bp_user_123"
+                          onChange={e => setUserFormData({...userFormData, userId: e.target.value})}
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-4 px-5 focus:border-green-500 outline-none transition-all text-xs font-black placeholder:text-zinc-800 text-white"
+                          placeholder="Ex: PRIME_USER_77"
                           disabled={!!userEditId}
                         />
-                        {isRenewalMode && (
-                          <div className="text-[9px] font-black text-blue-500 uppercase tracking-widest mt-2 animate-pulse flex items-center gap-1">
-                            <ShieldCheck size={12} /> ⚡ Existing User detected: Renewal Mode
-                          </div>
-                        )}
                       </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Full Name</label>
+                      <div className="col-span-2 space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Full Member Name</label>
                         <input 
                           type="text" 
                           value={userFormData.name}
                           onChange={e => setUserFormData({...userFormData, name: e.target.value})}
-                          className="w-full bg-[#111] border border-[#222] rounded-xl py-4 px-5 focus:border-blue-500 outline-none transition-all text-sm font-bold"
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-4 px-5 focus:border-green-500 outline-none transition-all text-xs font-black placeholder:text-zinc-800 text-white"
                           placeholder="MEMBER NAME"
                         />
                       </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Password</label>
+                      <div className="col-span-2 space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Access Key (Auth Pass)</label>
                         <input 
                           type="text" 
                           value={userFormData.password}
                           onChange={e => setUserFormData({...userFormData, password: e.target.value})}
-                          className="w-full bg-[#111] border border-[#222] rounded-xl py-4 px-5 focus:border-blue-500 outline-none transition-all text-sm font-bold"
-                          placeholder="GENERATED"
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-4 px-5 focus:border-green-500 outline-none transition-all text-xs font-black placeholder:text-zinc-800 text-white"
+                          placeholder="GENERATED-KEY-..."
                         />
                       </div>
 
-                      {/* Plan Logic */}
                       <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Subscription Plan</label>
-                        <div className="relative">
-                          <select 
-                            value={userFormData.planName}
-                            onChange={e => {
-                              const val = e.target.value;
-                              let price = '₹19';
-                              let days = 7;
-                              if (val === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
-                              if (val === '90 Days (149 RS)') { price = '₹149'; days = 90; }
-                              
-                              const expiry = new Date(new Date(userFormData.startDate).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                              setUserFormData({...userFormData, planName: val, planPrice: price, expiryDate: expiry});
-                            }}
-                            className="w-full bg-[#111] border border-[#222] rounded-xl py-3 px-4 focus:border-[#e50914] outline-none transition-all text-xs font-black appearance-none cursor-pointer text-white"
-                          >
-                            <option value="Weekly (19 RS)" className="bg-[#0a0a0a]">Weekly (19 RS)</option>
-                            <option value="Monthly (55 RS)" className="bg-[#0a0a0a]">Monthly (55 RS)</option>
-                            <option value="90 Days (149 RS)" className="bg-[#0a0a0a]">90 Days (149 RS)</option>
-                          </select>
-                          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                            <ChevronRight size={14} className="text-[#444] rotate-90" />
-                          </div>
-                        </div>
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Subscription Tier</label>
+                        <select 
+                          value={userFormData.planName}
+                          onChange={e => {
+                            const val = e.target.value;
+                            let price = '₹19';
+                            let days = 7;
+                            if (val === 'Monthly (55 RS)') { price = '₹55'; days = 30; }
+                            if (val === '90 Days (149 RS)') { price = '₹149'; days = 90; }
+                            const expiry = new Date(new Date(userFormData.startDate).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                            setUserFormData({...userFormData, planName: val, planPrice: price, expiryDate: expiry});
+                          }}
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-3 px-5 focus:border-green-500 outline-none transition-all text-xs font-black appearance-none cursor-pointer text-white"
+                        >
+                          <option value="Weekly (19 RS)">Weekly (19 RS)</option>
+                          <option value="Monthly (55 RS)">Monthly (55 RS)</option>
+                          <option value="90 Days (149 RS)">90 Days (149 RS)</option>
+                        </select>
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Start Date</label>
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Paid Amount (RS)</label>
+                        <input 
+                          type="text" 
+                          value={userFormData.planPrice}
+                          readOnly
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-3 px-5 focus:border-green-500 outline-none transition-all text-xs font-black opacity-50 cursor-not-allowed text-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Activation Date</label>
                         <input 
                           type="date" 
                           value={userFormData.startDate}
@@ -1167,94 +1251,150 @@ export default function AdminPanel({
                             const expiry = new Date(new Date(start).getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
                             setUserFormData({...userFormData, startDate: start, expiryDate: expiry});
                           }}
-                          className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold"
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-3 px-5 focus:border-green-500 outline-none transition-all text-xs font-black appearance-none text-white"
                         />
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-[#555] uppercase tracking-widest ml-1">Expiry Date</label>
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Lifecycle Termination</label>
                         <input 
                           type="date" 
                           value={userFormData.expiryDate}
-                          onChange={e => setUserFormData({...userFormData, expiryDate: e.target.value})}
-                          className="w-full bg-[#111] border border-[#222] rounded-lg py-2.5 px-4 focus:border-blue-500 outline-none transition-all text-xs font-bold"
+                          readOnly
+                          className="w-full bg-[#050505] border border-white/5 rounded-xl py-3 px-5 focus:border-zinc-800 outline-none transition-all text-xs font-black opacity-50 cursor-not-allowed text-white"
                         />
                       </div>
-                    </div>
 
-                    <div className="flex gap-4 pt-4">
-                      <button 
-                        type="submit" 
-                        disabled={isUserSubmitting}
-                        className="flex-1 bg-[#e50914] hover:bg-[#ff0f1a] disabled:bg-[#8b0000] text-white font-black py-5 rounded-2xl transition-all uppercase tracking-widest shadow-[0_0_30px_rgba(229,9,20,0.3)] active:scale-95"
-                      >
-                        {isUserSubmitting ? 'SYNCING...' : (userEditId ? 'UPDATE ACCOUNT' : 'SYNC TO CLOUD')}
-                      </button>
-                      <button 
-                        type="button" 
-                        onClick={resetUserForm}
-                        className="px-10 bg-[#222] hover:bg-[#333] text-white font-black rounded-2xl transition-all active:scale-95 uppercase tracking-widest"
-                      >
-                        RESET
-                      </button>
+                      <div className="col-span-2 pt-6 flex gap-4">
+                        <button 
+                          type="submit"
+                          disabled={isUserSubmitting || !userFormData.userId}
+                          className="flex-1 btn bg-green-600 border-none hover:bg-green-700 text-white font-black text-[10px] uppercase tracking-widest h-14 rounded-2xl shadow-[0_10px_30px_rgba(22,163,74,0.3)] active:scale-95 transition-all"
+                        >
+                          {isUserSubmitting ? 'SYNCING...' : (userEditId ? 'UPDATE MEMBER PROFILE' : 'DEPLOY ACCESS CREDENTIALS')}
+                        </button>
+                        <button 
+                          type="button" 
+                          onClick={resetUserForm}
+                          className="btn bg-zinc-800 border-none hover:bg-zinc-700 text-white font-black text-[10px] uppercase tracking-widest h-14 px-8 rounded-2xl"
+                        >
+                          FLUSH
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* OCR Scanning Intelligence */}
+                  <div className="glass-card p-8 flex flex-col items-center justify-center relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 w-40 h-40 bg-blue-600/5 blur-[80px] rounded-full group-hover:bg-blue-600/10 transition-all duration-500"></div>
+                    
+                    <div className="relative z-10 text-center w-full max-w-sm">
+                      <div className="w-20 h-20 bg-blue-600/10 rounded-[2rem] flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-all duration-500 border border-blue-500/20 shadow-[0_0_30px_rgba(37,99,235,0.15)]">
+                        {isOcrLoading ? <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" /> : <Scan className="w-8 h-8 text-blue-500" />}
+                      </div>
+                      <h3 className="text-xl font-black uppercase italic tracking-tighter text-white mb-2">RECEIPT SYNC (AI VISION)</h3>
+                      <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest leading-relaxed mb-8">
+                        Deploy a payment verification screenshot to automatically extract subscription metadata.
+                      </p>
+
+                      <label className="w-full flex items-center justify-center gap-3 bg-[#050505] border-2 border-dashed border-zinc-800 hover:border-blue-500/50 hover:bg-blue-600/5 transition-all p-8 rounded-3xl cursor-pointer">
+                        <div className="flex flex-col items-center">
+                          <PlusCircle className="w-6 h-6 text-blue-500 mb-2" />
+                          <span className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Scan Receipt Data</span>
+                        </div>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          onChange={handleOcrScan} 
+                          className="hidden" 
+                          disabled={isOcrLoading}
+                        />
+                      </label>
+
+                      {isOcrLoading && (
+                        <div className="mt-8 w-full">
+                          <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-[#e50914] mb-2">
+                            <span>Scanning Matrix</span>
+                            <span>PROCESSING...</span>
+                          </div>
+                          <progress className="progress progress-error w-full h-1 bg-zinc-900" value="70" max="100"></progress>
+                        </div>
+                      )}
                     </div>
-                  </form>
+                  </div>
                 </div>
 
-                {/* User Table */}
-                <div className="bg-[#111] border border-[#222] rounded-2xl overflow-hidden shadow-2xl">
-                  <div className="p-4 border-b border-[#222] flex justify-between items-center bg-zinc-900/50">
-                    <h5 className="font-black text-[9px] uppercase tracking-[0.4em] text-[#e50914]">SYSTEM IDENTITY DATABASE</h5>
+                {/* Member Database Table */}
+                <div className="glass-card overflow-hidden">
+                  <div className="p-6 border-b border-white/5 flex justify-between items-center bg-white/5">
+                    <h3 className="text-sm font-black uppercase italic tracking-widest text-green-500 flex items-center gap-2">
+                      <ShieldCheck size={16} /> VERIFIED MEMBER DATABASE
+                    </h3>
+                    <button 
+                      onClick={handleClearExpiredUsers}
+                      className="text-[8px] font-black text-red-600 hover:text-red-500 uppercase tracking-[0.4em] border border-red-600/10 px-4 py-2 rounded-lg hover:bg-red-600/5 transition-all"
+                    >
+                      Purge Expired
+                    </button>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead className="bg-black/40 text-[8px] font-black uppercase tracking-[0.3em] text-[#555]">
+                  <div className="overflow-x-auto p-4 custom-scrollbar">
+                    <table className="table w-full border-separate border-spacing-y-2">
+                      <thead className="bg-[#050505] text-[8px] font-black uppercase tracking-[0.3em] text-[#444]">
                         <tr>
-                          <th className="p-4">Name</th>
-                          <th className="p-4">ID</th>
-                          <th className="p-4">Pass</th>
-                          <th className="p-4 text-center">Plan</th>
-                          <th className="p-4 text-center">Price</th>
-                          <th className="p-4">Start</th>
-                          <th className="p-4">Expiry</th>
-                          <th className="p-4 text-right">Action</th>
+                          <th className="rounded-l-lg p-4">Member ID</th>
+                          <th className="p-4">Active Plan</th>
+                          <th className="p-4">Paid Amt</th>
+                          <th className="p-4">Expiry Timeline</th>
+                          <th className="rounded-r-lg p-4 text-right">Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#222]">
-                        {users.map(user => (
-                          <tr key={user.id} className="group hover:bg-white/[0.02] transition-colors border-b border-[#1a1a1a]">
-                            <td className="p-4 font-bold text-white uppercase italic tracking-tighter text-[10px]">{user.name || 'GUEST USER'}</td>
-                            <td className="p-4"><code className="text-[#3498db] text-[10px] font-bold uppercase">{user.userId}</code></td>
-                            <td className="p-4"><code className="text-[#f1c40f] text-[10px] font-bold uppercase">{user.password || '---'}</code></td>
-                            <td className="p-4 text-center">
-                              <span className="bg-[#e50914] text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-tighter shadow-xl">
-                                {user.plan || user.planName || 'BASIC'}
-                              </span>
-                            </td>
-                            <td className="p-4 text-center">
-                              <span className="text-white font-black text-[10px]">{user.planPrice || (user.amount ? `₹${user.amount}` : '---')}</span>
-                            </td>
-                            <td className="p-4 text-[#888] text-[9px] font-bold">{user.startDate || 'N/A'}</td>
-                            <td className="p-4">
-                              <div className="flex flex-col">
-                                <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-tighter w-fit mb-1 ${(user.expiryDate || user.expiry) && new Date(user.expiryDate || user.expiry) < new Date() ? 'bg-red-600 text-white' : 'bg-green-600/10 text-green-500'}`}>
-                                  {(user.expiryDate || user.expiry) && new Date(user.expiryDate || user.expiry) < new Date() ? 'EXPIRED' : 'ACTIVE'}
+                      <tbody className="space-y-2">
+                        {users.map(user => {
+                          const isExpired = (user.expiryDate || user.expiry) && new Date(user.expiryDate || user.expiry) < new Date();
+                          return (
+                            <tr key={user.id} className="bg-white/[0.02] hover:bg-white/[0.04] transition-all group border-none shadow-xl">
+                              <td className="p-4 rounded-l-xl">
+                                <div className="flex flex-col">
+                                  <span className="text-[11px] font-black italic uppercase tracking-tighter text-white">{user.name || 'GUEST'}</span>
+                                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{user.userId}</span>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <span className="badge badge-success border-green-600/30 text-green-500 bg-green-600/5 text-[8px] font-black uppercase px-3 py-3 rounded-lg">
+                                  {user.plan || user.planName || "VIP Access"}
                                 </span>
-                                <span className="text-white font-black text-[9px] uppercase tracking-tighter italic">{user.expiryDate || user.expiry || 'N/A'}</span>
-                              </div>
-                            </td>
-                            <td className="p-4 text-right">
-                              <div className="flex gap-2 justify-end">
-                                <button onClick={() => prepareUserEdit(user)} className="p-1.5 text-[#3498db] hover:bg-[#3498db]/10 rounded-lg transition-all">
-                                  <Pencil size={14} />
-                                </button>
-                                <button onClick={() => handleUserDelete(user.id)} className="p-1.5 text-[#e50914] hover:bg-[#e50914]/10 rounded-lg transition-all">
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td className="p-4">
+                                <span className="text-[10px] font-black text-white">{user.planPrice || (user.amount ? `₹${user.amount}` : '---')}</span>
+                              </td>
+                              <td className="p-4">
+                                <div className="flex flex-col gap-1">
+                                  <span className={`text-[9px] font-black uppercase tracking-widest ${isExpired ? 'text-red-500' : 'text-zinc-500'}`}>
+                                    {isExpired ? 'EXPIRED' : (user.expiryDate || user.expiry || 'N/A')}
+                                  </span>
+                                  {(user.expiryDate || user.expiry) && (
+                                    <div className="w-24 h-1 bg-zinc-900 rounded-full overflow-hidden">
+                                      <div 
+                                        className={`h-full ${isExpired ? 'bg-red-600' : 'bg-green-500'}`} 
+                                        style={{ width: `${Math.max(0, Math.min(100, (new Date(user.expiryDate || user.expiry).getTime() - Date.now()) / (30 * 24 * 60 * 60 * 1000) * 100))}%` }}
+                                      ></div>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-4 text-right rounded-r-xl">
+                                <div className="flex gap-2 justify-end">
+                                  <button onClick={() => prepareUserEdit(user)} className="p-3 bg-blue-600/5 text-blue-500 hover:bg-blue-600 hover:text-white rounded-xl transition-all border border-blue-600/10 active:scale-90 shadow-lg">
+                                    <Pencil size={14} />
+                                  </button>
+                                  <button onClick={() => handleUserDelete(user.userId)} className="p-3 bg-red-600/5 text-red-500 hover:bg-red-600 hover:text-white rounded-xl transition-all border border-red-600/10 active:scale-90 shadow-lg">
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1270,68 +1410,197 @@ export default function AdminPanel({
                 exit={{ opacity: 0, x: 20 }}
                 className="space-y-6"
               >
-                <div className="bg-[#111] border border-[#222] rounded-2xl overflow-hidden shadow-2xl">
-                  <div className="p-5 border-b border-[#222] flex justify-between items-center bg-zinc-900/50">
-                    <h5 className="font-black text-[10px] uppercase tracking-[0.4em] text-[#e50914] flex items-center gap-2">
-                      <UserCheck size={16} /> REGISTRATION APPROVAL CENTER
-                    </h5>
-                    <span className="bg-[#1a1a1a] text-zinc-500 text-[9px] font-black px-3 py-1 rounded-full border border-white/5">
-                      {memberRequests.length} PENDING
-                    </span>
+                <div className="glass-card overflow-hidden">
+                  <div className="p-6 border-b border-white/5 flex justify-between items-center bg-white/5">
+                    <div>
+                      <h3 className="text-sm font-black uppercase italic tracking-widest text-[#e50914] flex items-center gap-2">
+                        <UserCheck size={16} /> REGISTRATION APPROVAL CENTER
+                      </h3>
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Pending user authentication requests</p>
+                    </div>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead className="bg-black/40 text-[8px] font-black uppercase tracking-[0.3em] text-[#555]">
+                  <div className="overflow-x-auto p-4 custom-scrollbar">
+                    <table className="table w-full border-separate border-spacing-y-2">
+                      <thead className="bg-[#050505] text-[8px] font-black uppercase tracking-[0.3em] text-[#444]">
                         <tr>
-                          <th className="p-4">Candidate Name</th>
-                          <th className="p-4">Proposed ID</th>
-                          <th className="p-4">Security Key</th>
-                          <th className="p-4 text-center">Plan Requested</th>
-                          <th className="p-4">Request Date</th>
-                          <th className="p-4 text-right">Actions</th>
+                          <th className="rounded-l-lg p-4">Candidate Identity</th>
+                          <th className="p-4">Access Key</th>
+                          <th className="p-4">Plan Request</th>
+                          <th className="p-4">Transaction ID</th>
+                          <th className="p-4">Timestamp</th>
+                          <th className="rounded-r-lg p-4 text-right">Operational Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#222]">
+                      <tbody className="space-y-2">
                         {memberRequests.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="p-12 text-center text-[#444] font-black uppercase tracking-[0.4em] text-[10px]">
-                              Zero Pending Account Requests
+                            <td colSpan={6} className="text-center py-20 text-zinc-700 font-black uppercase tracking-[0.5em] text-[10px]">
+                              Zero Pending Requests
                             </td>
                           </tr>
                         ) : (
                           memberRequests.map((req) => (
-                            <tr key={req.id} className="group hover:bg-white/[0.02] transition-colors border-b border-[#1a1a1a]">
-                              <td className="p-4 font-bold text-white uppercase italic tracking-tighter text-[11px]">{req.name}</td>
-                              <td className="p-4"><code className="text-[#3498db] text-[10px] font-bold uppercase">{req.userId}</code></td>
-                              <td className="p-4"><code className="text-[#f1c40f] text-[10px] font-bold uppercase">{req.password}</code></td>
-                              <td className="p-4 text-center">
-                                <span className="bg-red-600/10 text-red-500 border border-red-600/20 text-[8px] font-black px-2 py-1 rounded uppercase tracking-tighter">
-                                  {req.plan || req.planName || 'Weekly (19 RS)'}
+                            <tr key={req.id} className="bg-white/[0.02] hover:bg-white/[0.04] transition-all group border-none shadow-xl">
+                              <td className="p-4 rounded-l-xl">
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 bg-red-600 rounded-full" />
+                                    <span className="text-[11px] font-black italic uppercase tracking-tighter text-white">{req.name}</span>
+                                  </div>
+                                  <div className="flex flex-col px-3">
+                                    <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest leading-none">UID: {req.userId}</span>
+                                    <span className="text-[8px] text-blue-500 font-black uppercase tracking-widest mt-0.5 leading-none">PASS: {req.password}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <code className="text-blue-500 text-[10px] font-black bg-blue-500/10 px-3 py-1 rounded-md border border-blue-500/20">{req.password}</code>
+                              </td>
+                              <td className="p-4">
+                                <span className={`text-[8px] font-black uppercase px-2 py-1 rounded border border-red-600/20 text-red-500 bg-red-600/5`}>
+                                  {req.plan || "90 Days VIP"}
                                 </span>
                               </td>
-                              <td className="p-4 text-zinc-600 text-[9px] font-bold">
-                                {req.timestamp?.toDate().toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) || 'Just Now'}
+                              <td className="p-4">
+                                {req.transactionId ? (
+                                  <code className="text-yellow-500 text-[9px] font-black bg-yellow-500/10 px-2 py-1 rounded border border-yellow-500/20">{req.transactionId}</code>
+                                ) : (
+                                  <span className="text-[8px] text-zinc-600 font-black italic uppercase tracking-widest italic opacity-40">N/A</span>
+                                )}
                               </td>
-                              <td className="p-4 text-right">
+                              <td className="p-4 text-zinc-600 text-[9px] font-black uppercase tracking-widest">
+                                {req.timestamp?.toDate().toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) || 'SYNCING...'}
+                              </td>
+                              <td className="p-4 text-right rounded-r-xl">
                                 <div className="flex gap-2 justify-end">
-                                  <button 
-                                    onClick={() => handleApproveRegistration(req)}
-                                    className="p-2 bg-green-600/10 text-green-500 hover:bg-green-600 hover:text-white rounded-lg transition-all border border-green-600/10"
-                                    title="Approve Member"
-                                  >
-                                    <Check size={14} />
+                                  <button onClick={() => handleApproveRegistration(req)} className="btn btn-xs h-9 px-4 bg-green-600 border-none hover:bg-green-700 text-white font-black uppercase text-[8px] tracking-widest rounded-lg shadow-lg shadow-green-600/20">
+                                    APPROVE
                                   </button>
-                                  <button 
-                                    onClick={() => handleRejectRegistration(req.id)}
-                                    className="p-2 bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white rounded-lg transition-all border border-red-600/10"
-                                    title="Reject Request"
-                                  >
-                                    <X size={14} />
+                                  <button onClick={() => handleRejectRegistration(req.id)} className="btn btn-xs h-9 px-4 bg-zinc-800 border-none hover:bg-zinc-700 text-red-500 font-black uppercase text-[8px] tracking-widest rounded-lg">
+                                    DENY
                                   </button>
                                 </div>
                               </td>
                             </tr>
                           ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeView === 'plan-requests' && (
+              <motion.div 
+                key="plan-requests"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="space-y-6"
+              >
+                <div className="glass-card overflow-hidden">
+                  <div className="p-6 border-b border-white/5 flex justify-between items-center bg-white/5">
+                    <div>
+                      <h3 className="text-sm font-black uppercase italic tracking-widest text-blue-500 flex items-center gap-2">
+                        <Calendar size={16} /> UPGRADE & EXTENSION REQUESTS
+                      </h3>
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Extensions and Upgrades</p>
+                    </div>
+                    <button 
+                      onClick={handleClearPlanRequests}
+                      className="text-[8px] font-black text-red-600 hover:text-red-500 uppercase tracking-[0.4em] border border-red-600/10 px-4 py-2 rounded-lg hover:bg-red-600/5 transition-all"
+                    >
+                      Clear Processed
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto p-4 custom-scrollbar">
+                    <table className="table w-full border-separate border-spacing-y-2">
+                      <thead className="bg-[#050505] text-[8px] font-black uppercase tracking-[0.3em] text-[#444]">
+                        <tr>
+                          <th className="rounded-l-lg p-4">Member Identity (ID/PASS)</th>
+                          <th className="p-4">Transaction UTR</th>
+                          <th className="p-4">Current Configuration</th>
+                          <th className="p-4">Upgrade Path (Target)</th>
+                          <th className="p-4">Request Meta</th>
+                          <th className="rounded-r-lg p-4 text-right">Operational Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="space-y-2">
+                        {upgradeRequests.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="text-center py-20 text-zinc-700 font-black uppercase tracking-[0.5em] text-[10px]">
+                              Zero Plan Requests
+                            </td>
+                          </tr>
+                        ) : (
+                          upgradeRequests.map((req) => {
+                            const targetUser = users.find(u => u.userId === req.userId);
+                            return (
+                              <tr key={req.id} className={`bg-white/[0.02] hover:bg-white/[0.04] transition-all group border-none shadow-xl ${req.status !== 'pending' ? 'opacity-40 grayscale' : ''}`}>
+                                <td className="p-4 rounded-l-xl">
+                                  <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-1.5 h-1.5 bg-blue-600 rounded-full" />
+                                      <span className="text-[11px] font-black italic uppercase tracking-tighter text-white">{req.userName || targetUser?.name || 'Anonymous'}</span>
+                                    </div>
+                                    <div className="flex flex-col px-3">
+                                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest leading-none">UID: {req.userId}</span>
+                                      <span className="text-[8px] text-blue-400 font-black uppercase tracking-widest mt-0.5 leading-none">PASS: {targetUser?.password || '••••'}</span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  {req.transactionId ? (
+                                    <code className="text-yellow-500 text-[10px] font-black bg-yellow-500/10 px-3 py-1.5 rounded-lg border border-yellow-500/20 shadow-lg">{req.transactionId}</code>
+                                  ) : (
+                                    <span className="text-[8px] text-zinc-600 font-black italic uppercase tracking-widest opacity-40">N/A</span>
+                                  )}
+                                </td>
+                                <td className="p-4">
+                                  <div className="flex flex-col gap-1">
+                                    <div className="text-[9px] font-black text-white/50 uppercase tracking-tighter">{targetUser?.plan || 'Standard Access'}</div>
+                                    <div className="text-[7px] text-zinc-500 font-black uppercase tracking-widest flex items-center gap-1">
+                                      <Clock size={8} className="text-red-500/60" /> {targetUser?.expiryDate || 'EXPIRY N/A'}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <div className="flex flex-col">
+                                    <div className="flex items-center gap-1">
+                                      <ArrowUpRight size={10} className="text-green-500" />
+                                      <span className="text-[10px] font-black text-green-500 uppercase italic tracking-tighter">{req.planName}</span>
+                                    </div>
+                                    <span className="text-[8px] text-zinc-400 font-black uppercase tracking-widest mt-0.5">
+                                      Price: {req.planName?.includes('Weekly') ? '₹19' : req.planName?.includes('Monthly') ? '₹55' : '₹149'}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <div className="flex flex-col gap-1">
+                                    <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md inline-block w-fit ${req.status === 'approved' ? 'bg-green-500/10 text-green-500' : req.status === 'rejected' ? 'bg-red-500/10 text-red-500' : 'bg-yellow-500/10 text-yellow-500 animate-pulse'}`}>
+                                      {req.status}
+                                    </span>
+                                    <span className="text-[7px] text-zinc-600 font-bold uppercase tracking-widest">
+                                      {req.timestamp?.toDate().toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) || 'SYNCING...'}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-4 text-right rounded-r-xl">
+                                  {req.status === 'pending' && (
+                                    <div className="flex gap-2 justify-end">
+                                      <button onClick={() => handleApprovePlanRequest(req)} className="btn btn-xs h-9 px-4 bg-green-600 border-none hover:bg-green-700 text-white font-black uppercase text-[8px] tracking-widest rounded-lg shadow-lg shadow-green-600/20 active:scale-95">
+                                        APPROVE
+                                      </button>
+                                      <button onClick={() => handleRejectPlanRequest(req.id)} className="btn btn-xs h-9 px-4 bg-zinc-800 border-none hover:bg-zinc-700 text-red-500 font-black uppercase text-[8px] tracking-widest rounded-lg active:scale-95">
+                                        DENY
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>
@@ -1346,12 +1615,13 @@ export default function AdminPanel({
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="space-y-4"
+                className="space-y-6"
               >
                 <div className="flex justify-between items-center mb-6 px-2">
-                  <h4 className="text-sm font-black italic flex items-center gap-2 uppercase tracking-widest text-zinc-400">
-                    <ListVideo className="text-[#e50914]" size={16} /> Incoming Requests
-                  </h4>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-[#e50914] rounded-xl shadow-[0_0_15px_rgba(229,9,20,0.4)]"><ListVideo className="text-white w-5 h-5" /></div>
+                    <h4 className="text-lg font-black uppercase italic tracking-tighter text-white">Content Requests Hub</h4>
+                  </div>
                   <button 
                     onClick={handleClearSolvedRequests}
                     className="text-[8px] font-black text-red-600 hover:text-red-500 uppercase tracking-[0.4em] border border-red-600/10 px-4 py-2 rounded-lg hover:bg-red-600/5 transition-all"
@@ -1360,114 +1630,189 @@ export default function AdminPanel({
                   </button>
                 </div>
 
-                <div className="grid gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {movieRequests.length === 0 ? (
-                    <div className="bg-[#111] border border-[#222] p-12 rounded-2xl text-center text-[#444] font-black uppercase tracking-[0.4em] text-[10px]">
+                    <div className="col-span-full glass-card p-16 text-center text-zinc-700 font-black uppercase tracking-[0.5em] text-[10px]">
                       Zero Active Requests
                     </div>
                   ) : (
                     movieRequests.map((req) => (
-                      <div 
+                      <motion.div 
                         key={req.id} 
-                        className={`bg-[#0d0d0d] border border-[#222] p-5 rounded-2xl transition-all hover:border-white/10 ${req.status === 'solved' ? 'border-l-2 border-l-green-500 opacity-60 scale-98' : ''}`}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className={`glass-card p-6 transition-all group relative overflow-hidden border-l-4 ${req.status === 'solved' ? 'border-zinc-800 opacity-40 grayscale' : 'border-red-600 hover:border-red-500'}`}
                       >
-                        <div className="flex flex-col md:flex-row justify-between gap-5">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <h5 className="text-[13px] font-black text-white uppercase italic tracking-tighter">{req.title}</h5>
-                              <span className="text-zinc-600 text-[10px] font-bold">({req.year || 'N/A'})</span>
+                        <div className="absolute top-0 right-0 p-2 opacity-5"><ListVideo size={48} /></div>
+                        
+                        <div className="flex flex-col h-full">
+                          <div className="mb-4">
+                            <div className="flex items-center gap-3 mb-1">
+                              <h5 className="text-sm font-black text-white uppercase italic tracking-tighter group-hover:text-red-500 transition-colors">
+                                {req.title}
+                              </h5>
+                              <span className="text-zinc-600 text-[9px] font-bold">({req.year || '2026'})</span>
                             </div>
-                            <div className="flex flex-wrap gap-2 mb-3">
-                              <span className="text-[8px] font-black bg-zinc-900 border border-white/5 text-zinc-500 px-2.5 py-1 rounded-md uppercase tracking-widest">{req.category}</span>
-                              <span className="text-[8px] font-black bg-zinc-900 border border-white/5 text-zinc-500 px-2.5 py-1 rounded-md uppercase tracking-widest">{req.language || 'Any Language'}</span>
-                            </div>
-                            {req.note && (
-                              <p className="text-cyan-500 text-[10px] font-medium mb-3 bg-cyan-500/5 p-3 rounded-xl border border-cyan-500/10 italic leading-relaxed">
-                                {req.note}
-                              </p>
-                            )}
-                            <div className="text-[8px] font-black text-zinc-800 uppercase tracking-widest">
-                               USER: {req.userName || 'GUEST'} <span className="mx-1 opacity-20">|</span> SESSION: {req.timestamp?.toDate().toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) || 'SYNCING'}
+                            <div className="flex flex-wrap gap-2">
+                              <span className="text-[7px] font-black bg-white/5 border border-white/5 text-zinc-500 px-2 py-0.5 rounded uppercase tracking-widest">{req.category}</span>
+                              <span className="text-[7px] font-black bg-white/5 border border-white/5 text-zinc-500 px-2 py-0.5 rounded uppercase tracking-widest">{req.language || 'Multi'}</span>
                             </div>
                           </div>
-                          <div className="flex flex-row md:flex-col gap-2 justify-end">
-                            {req.status !== 'solved' ? (
+
+                          {req.note && (
+                            <div className="flex-1 text-blue-400 text-[10px] font-medium mb-4 bg-blue-500/5 p-3 rounded-lg border border-blue-500/10 italic leading-relaxed">
+                              "{req.note}"
+                            </div>
+                          )}
+
+                          <div className="mt-auto space-y-4">
+                            <div className="text-[8px] font-black text-zinc-600 uppercase tracking-widest flex items-center gap-2">
+                              <div className="w-1 h-1 rounded-full bg-zinc-800"></div>
+                              By: {req.userName || 'GUEST'} <span className="opacity-20">|</span> {req.timestamp?.toDate().toLocaleString([], {month:'short', day:'numeric'}) || 'SYNCING'}
+                            </div>
+
+                            <div className="flex gap-2">
+                              {req.status !== 'solved' ? (
+                                <button 
+                                  onClick={() => handleSolveRequest(req.id)}
+                                  className="flex-1 btn btn-xs h-9 bg-green-600 border-none hover:bg-green-700 text-white font-black text-[8px] uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-green-600/10"
+                                >
+                                  Resolve
+                                </button>
+                              ) : (
+                                <div className="flex-1 flex items-center justify-center bg-zinc-900 text-zinc-600 rounded-lg text-[8px] font-black uppercase tracking-widest h-9 border border-white/5">
+                                  Done
+                                </div>
+                              )}
                               <button 
-                                onClick={() => handleSolveRequest(req.id)}
-                                className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-green-600/10 hover:bg-green-600 text-green-500 hover:text-white border border-green-600/20 px-5 py-2.5 rounded-xl text-[8px] font-black uppercase tracking-[0.3em] transition-all"
+                                onClick={() => handleDeleteRequest(req.id)}
+                                className="px-3 bg-zinc-800 text-zinc-400 hover:text-white rounded-lg transition-all border border-white/5"
                               >
-                                <Check size={12} /> Resolve
+                                <Trash2 size={12} />
                               </button>
-                            ) : (
-                              <span className="flex-1 md:flex-none bg-green-600/5 text-green-500/50 px-5 py-2.5 rounded-xl text-[8px] font-black uppercase tracking-[0.3em] text-center border border-green-600/10 italic">
-                                Processed
-                              </span>
-                            )}
-                            <button 
-                              onClick={() => handleDeleteRequest(req.id)}
-                              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-zinc-900 hover:bg-red-600/10 hover:text-red-500 text-zinc-700 hover:border-red-600/20 border border-white/5 px-5 py-2.5 rounded-xl text-[8px] font-black uppercase tracking-[0.3em] transition-all"
-                            >
-                              <Trash size={12} /> Discard
-                            </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      </motion.div>
                     ))
                   )}
                 </div>
               </motion.div>
             )}
 
+             {activeView === 'settings' && (
+               <motion.div 
+                 key="settings"
+                 initial={{ opacity: 0, y: 20 }}
+                 animate={{ opacity: 1, y: 0 }}
+                 exit={{ opacity: 0, y: -20 }}
+                 className="space-y-8"
+               >
+                 <div className="max-w-2xl">
+                   <div className="glass-card p-8">
+                     <div className="flex items-center gap-3 mb-8">
+                        <div className="p-2.5 bg-blue-600 rounded-xl shadow-lg"><Globe size={20} className="text-white" /></div>
+                        <div>
+                          <h3 className="text-lg font-black uppercase italic tracking-tighter text-white">Universal Payment Settings</h3>
+                          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Configure UPI and Merchant metadata</p>
+                        </div>
+                     </div>
+
+                     <form onSubmit={handleSaveSettings} className="space-y-6">
+                       <div className="space-y-2">
+                         <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Universal UPI ID</label>
+                         <input 
+                           type="text" 
+                           value={systemSettings.upiId}
+                           onChange={e => setSystemSettings({...systemSettings, upiId: e.target.value})}
+                           className="w-full bg-[#050505] border border-white/5 rounded-2xl py-4 px-6 focus:border-blue-500 outline-none transition-all text-xs font-black text-white"
+                           placeholder="Ex: merchant@upi"
+                         />
+                         <p className="text-[8px] text-zinc-600 font-bold uppercase mt-2 ml-1 italic tracking-widest">
+                           * QR code will only be visible to users if this ID is active.
+                         </p>
+                       </div>
+
+                       <div className="space-y-2">
+                         <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.3em] ml-1">Merchant Display Name</label>
+                         <input 
+                           type="text" 
+                           value={systemSettings.merchantName}
+                           onChange={e => setSystemSettings({...systemSettings, merchantName: e.target.value})}
+                           className="w-full bg-[#050505] border border-white/5 rounded-2xl py-4 px-6 focus:border-blue-500 outline-none transition-all text-xs font-black text-white"
+                           placeholder="Bharat Prime"
+                         />
+                       </div>
+
+                       <button 
+                         type="submit"
+                         className="w-full btn bg-blue-600 border-none hover:bg-blue-700 text-white font-black text-[10px] uppercase tracking-widest h-14 rounded-2xl shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 transition-all mt-6"
+                       >
+                         Save System Configuration
+                       </button>
+                     </form>
+                   </div>
+                 </div>
+               </motion.div>
+             )}
+
             {activeView === 'security' && (
               <motion.div 
                 key="security"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
                 className="max-w-xl mx-auto"
               >
-                <div className="bg-[#141414] border border-[#222] p-8 rounded-[2rem] shadow-2xl text-center">
-                  <h4 className="text-xl font-black mb-8 flex items-center justify-center gap-3 italic">
-                    <ShieldCheck className="text-[#e50914]" /> SYSTEM SECURITY
-                  </h4>
+                <div className="glass-card p-10 text-center relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-600/50 to-transparent"></div>
                   
-                  <div className="bg-[#111] border border-[#333] p-8 rounded-3xl space-y-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-[#555] uppercase tracking-[0.3em]">Daily Pin</label>
+                  <div className="w-16 h-16 bg-red-600/10 rounded-2xl flex items-center justify-center mx-auto mb-8 border border-red-500/20 shadow-[0_0_20px_rgba(229,9,20,0.15)]">
+                    <ShieldCheck className="text-red-500 w-8 h-8" />
+                  </div>
+                  
+                  <h4 className="text-xl font-black uppercase italic tracking-tighter text-white mb-8">System Access Firewall</h4>
+                  
+                  <div className="space-y-8">
+                    <div className="space-y-3">
+                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.4em]">Operational PIN Authorization</label>
                       <input 
                         type="text" 
                         value={pin}
                         onChange={e => setPin(e.target.value)}
-                        className="w-full bg-[#1f1f1f] border border-[#444] rounded-2xl py-5 text-center text-2xl font-black tracking-[0.5em] focus:border-[#e50914] outline-none transition-all"
+                        className="w-full bg-[#050505] border border-white/5 rounded-2xl py-6 text-center text-3xl font-black tracking-[0.8em] focus:border-red-600 outline-none transition-all text-white placeholder:text-zinc-900"
                         placeholder="----"
+                        maxLength={4}
                       />
                     </div>
                     
                     <button 
                       onClick={handleSavePin}
-                      className="w-full bg-[#e50914] hover:bg-[#ff0f1a] text-white font-black py-5 rounded-2xl transition-all shadow-[0_0_30px_rgba(229,9,20,0.3)] active:scale-95 uppercase tracking-widest"
+                      className="w-full btn bg-red-600 border-none hover:bg-red-700 text-white font-black h-16 rounded-2xl transition-all shadow-[0_10px_30px_rgba(229,9,20,0.3)] active:scale-95 text-[10px] uppercase tracking-[0.3em]"
                     >
-                      SAVE PIN
+                      UPDATE SECURITY GATE
                     </button>
                     
-                    <div className="py-3 rounded-xl bg-black text-[10px] font-black tracking-widest" style={{ color: pinStatus.color }}>
-                      {pinStatus.text}
-                    </div>
+                    {pinStatus.text && (
+                      <div className="py-4 rounded-xl bg-black border border-white/5 text-[9px] font-black tracking-[0.3em] uppercase animate-pulse" style={{ color: pinStatus.color }}>
+                         {pinStatus.text}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="mt-10 bg-black border border-[#222] rounded-2xl overflow-hidden">
-                    <div className="bg-[#1a1a1a] p-4 flex justify-between items-center border-b border-[#222]">
-                      <span className="text-[10px] font-black text-[#888] uppercase tracking-widest">Pin Logs (Recent 10)</span>
-                      <button onClick={handleClearPinHistory} className="text-[10px] font-black text-red-500 hover:text-red-400 uppercase tracking-widest">Clear All</button>
+                  <div className="mt-12 bg-black/40 border border-white/5 rounded-2xl overflow-hidden backdrop-blur-md">
+                    <div className="bg-white/5 p-4 flex justify-between items-center border-b border-white/5">
+                      <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Pin Access History</span>
+                      <button onClick={handleClearPinHistory} className="text-[9px] font-black text-red-500 hover:text-red-400 uppercase tracking-widest">Clear Logs</button>
                     </div>
-                    <div className="max-h-64 overflow-y-auto p-4 space-y-3">
+                    <div className="max-h-56 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                       {pinHistory.length === 0 ? (
-                        <div className="text-center text-[#444] py-8 text-xs font-bold uppercase tracking-widest">No logs available</div>
+                        <div className="text-center text-zinc-800 py-10 text-[10px] font-black uppercase tracking-[0.5em]">No Access Logs</div>
                       ) : (
                         pinHistory.map((log, i) => (
-                          <div key={i} className="flex justify-between items-center py-2 border-b border-[#111] last:border-0">
-                            <span className="text-sm font-black tracking-widest">{log.pin}</span>
-                            <span className="text-[10px] font-bold text-[#444] uppercase">
+                          <div key={i} className="flex justify-between items-center py-3 border-b border-white/[0.02] last:border-0 hover:bg-white/5 px-2 rounded-lg transition-colors">
+                            <span className="text-sm font-black tracking-widest text-zinc-300 italic">{log.pin}</span>
+                            <span className="text-[9px] font-bold text-zinc-600 uppercase">
                               {log.updatedAt?.toDate().toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) || "..."}
                             </span>
                           </div>
@@ -1476,110 +1821,76 @@ export default function AdminPanel({
                     </div>
                   </div>
 
-                  <div className="mt-10 bg-[#111] border border-[#222] p-8 rounded-3xl">
-                    <h6 className="text-[10px] font-black text-[#555] uppercase tracking-[0.3em] mb-6">Session Management</h6>
-                    <div className="space-y-4">
-                      <button 
-                        onClick={onLogoutAll}
-                        className="w-full flex items-center justify-center gap-3 px-6 py-5 bg-red-600/10 text-red-600 hover:bg-red-600/20 rounded-2xl font-black text-xs uppercase tracking-widest transition-all border border-red-600/20 shadow-lg active:scale-95"
-                      >
-                        <Trash2 size={18} /> Force Logout All Users
-                      </button>
-                      
-                      <p className="mt-4 text-[10px] text-[#444] font-bold leading-relaxed text-center uppercase tracking-widest">
-                        Note: This will <span className="text-red-600">instantly terminate</span> all active user logins across all browsers.
-                      </p>
-                    </div>
+                  <div className="mt-12 pt-8 border-t border-white/5">
+                    <button 
+                      onClick={onLogoutAll}
+                      className="w-full flex items-center justify-center gap-3 px-6 py-5 bg-red-600/5 text-red-600 hover:bg-red-600 hover:text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border border-red-600/10 active:scale-95"
+                    >
+                      <LogOut size={16} /> EMERGENCY LOGOUT ALL SESSIONS
+                    </button>
+                    <p className="mt-6 text-[9px] text-zinc-600 font-bold leading-relaxed text-center uppercase tracking-widest opacity-60">
+                      Warning: Terminates all active connections immediately.
+                    </p>
                   </div>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
-
-          {/* Live Logs Section - Always visible at bottom */}
-          <section className="mt-20">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-              <h5 className="text-xl font-black italic flex items-center gap-3">
-                <ListVideo className="text-[#e50914]" /> LIVE LOGS
-              </h5>
-              
-              <div className="flex bg-[#111] p-1 rounded-xl border border-[#222] overflow-x-auto no-scrollbar">
-                {['All', 'Movie', 'Series', 'Banner'].map((filter) => (
-                  <button
-                    key={filter}
-                    onClick={() => setActiveFilter(filter as any)}
-                    className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeFilter === filter ? 'bg-[#e50914] text-white shadow-lg' : 'text-[#555] hover:text-white'}`}
-                  >
-                    {filter === 'Series' ? 'Web Series' : filter === 'Banner' ? 'Banners' : filter === 'Movie' ? 'Movies' : 'All'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-[#111] border border-[#222] rounded-[2rem] overflow-hidden shadow-2xl">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <tbody className="divide-y divide-[#1a1a1a]">
-                    {filteredMovies.length === 0 ? (
-                      <tr>
-                        <td className="py-20 text-center text-[#444] font-black uppercase tracking-[0.3em]">No data found</td>
-                      </tr>
-                    ) : (
-                      filteredMovies.map(movie => (
-                        <tr key={movie.id} className="group hover:bg-white/[0.02] transition-colors">
-                          <td className="p-6 w-24">
-                            <img 
-                              src={movie.image || undefined} 
-                              className="w-14 h-20 object-cover rounded-xl border border-[#333] shadow-lg group-hover:scale-105 transition-transform" 
-                              alt="" 
-                              referrerPolicy="no-referrer"
-                              onError={(e: any) => e.target.src = 'https://via.placeholder.com/100x150?text=No+Img'}
-                            />
-                          </td>
-                          <td className="p-6">
-                            <div className="flex items-center gap-3 mb-2">
-                              <div className="font-black text-lg tracking-tight group-hover:text-[#e50914] transition-colors">
-                                {movie.title} <span className="text-[#555] text-xs font-bold">({movie.quality || 'N/A'})</span>
-                              </div>
-                              {movie.year && <span className="text-[#555] text-xs font-bold">({movie.year})</span>}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${movie.category === 'Banner' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : movie.category === 'Series' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-red-600/10 text-red-600 border border-red-600/20'}`}>
-                                {movie.category}
-                              </span>
-                              <span className="text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest bg-[#e50914] text-white">
-                                {movie.quality || 'HD'}
-                              </span>
-                              {movie.language && (
-                                <span className="text-[9px] font-black bg-[#1f1f1f] text-[#888] px-3 py-1 rounded-full uppercase tracking-widest border border-[#333]">
-                                  {movie.language}
-                                </span>
-                              )}
-                              <span className="text-[9px] font-black bg-[#1f1f1f] text-[#555] px-3 py-1 rounded-full uppercase tracking-widest border border-[#333]">
-                                {movie.links?.length || 0} Links
-                              </span>
-                            </div>
-                          </td>
-                          <td className="p-6 text-right">
-                            <div className="flex gap-3 justify-end">
-                              <button onClick={() => prepareEdit(movie)} className="p-3 bg-[#1a1a1a] text-blue-400 hover:bg-blue-400/10 rounded-xl transition-all active:scale-90 border border-[#222]">
-                                <Pencil size={18} />
-                              </button>
-                              <button onClick={() => handleDelete(movie.id)} className="p-3 bg-[#1a1a1a] text-red-500 hover:bg-red-500/10 rounded-xl transition-all active:scale-90 border border-[#222]">
-                                <Trash2 size={18} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </section>
         </div>
-      </main>
+      </div>
+
+      <div className="drawer-side z-50">
+          <label htmlFor="admin-drawer" aria-label="close sidebar" className="drawer-overlay"></label>
+          <div className="w-72 min-h-full bg-[#050505] border-r border-white/5 text-gray-400 p-6 flex flex-col">
+            <div className="flex items-center gap-3 mb-12 px-2">
+              <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center shadow-[0_0_25px_rgba(229,9,20,0.5)] border border-white/10 group-hover:scale-105 transition-transform">
+                <ShieldCheck className="text-white w-7 h-7" />
+              </div>
+              <div>
+                <h1 className="text-xl font-black tracking-tighter text-white uppercase italic leading-none">BHARAT<span className="text-red-600">PRIME</span></h1>
+                <p className="text-[7px] font-black text-zinc-600 uppercase tracking-[0.4em] mt-1">Command Unit</p>
+              </div>
+            </div>
+
+            <nav className="flex-1 space-y-1">
+              {[
+                { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
+                { id: 'registrations', label: 'Approvals', icon: UserCheck, badge: memberRequests.length },
+                { id: 'plan-requests', label: 'Upgrades', icon: Calendar, badge: upgradeRequests.filter(r => r.status === 'pending').length },
+                { id: 'upload', label: 'Add Content', icon: ListVideo },
+                { id: 'users', label: 'Members', icon: ShieldCheck },
+                { id: 'requests', label: 'Content Requests', icon: FileText, badge: stats.pendingRequests },
+                { id: 'settings', label: 'Settings', icon: Globe }
+              ].map((item) => (
+                <a 
+                  key={item.id}
+                  onClick={() => setActiveView(item.id as ViewType)}
+                  className={`flex items-center justify-between p-4 rounded-xl hover:bg-red-600/5 transition-all cursor-pointer group ${activeView === item.id ? 'bg-red-600/10 border-l-4 border-red-600 text-white font-black italic' : 'text-zinc-500'}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <item.icon size={18} className={activeView === item.id ? 'text-red-500' : 'group-hover:text-white transition-colors'} />
+                    <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>
+                  </div>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span className="badge badge-error badge-sm text-[8px] font-black text-white rounded-md animate-pulse">
+                      {item.badge}
+                    </span>
+                  )}
+                </a>
+              ))}
+            </nav>
+
+            <div className="mt-10 glass-card p-5 bg-red-600/5 border-red-900/20">
+              <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <ShieldCheck size={12} /> Security Shield
+              </p>
+              <p className="text-[9px] font-bold text-zinc-600 leading-relaxed uppercase tracking-tighter">
+                Admin session is encrypted and verified via System Auth ID.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

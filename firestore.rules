@@ -36,9 +36,17 @@ service cloud.firestore {
 
     // Registration Requests
     match /registrationRequests/{requestId} {
-      allow create: if true;
-      allow read: if true;
-      allow update, delete: if true;
+      allow create, read, update, delete: if true;
+    }
+
+    // Plan Requests
+    match /upgradeRequests/{requestId} {
+      allow create, read, update, delete: if true;
+    }
+
+    // Requests
+    match /requests/{requestId} {
+      allow create, read, update, delete: if true;
     }
 
     match /{document=**} {
